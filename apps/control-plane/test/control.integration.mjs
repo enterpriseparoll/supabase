@@ -1028,3 +1028,22 @@ test('backup downloads serve the cloud-format dump to permitted users only', asy
     code: 'ENOENT',
   })
 })
+test('migration checksums ignore line endings but catch real edits', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const sql = (
+    await readFile(new URL('../migrations/001_control.sql', import.meta.url), 'utf8')
+  ).replace(/\r\n/g, '\n')
+  const set = (value) =>
+    pool.query("UPDATE public.platform_migrations SET checksum=$1 WHERE name='001_control.sql'", [
+      value,
+    ])
+  try {
+    // Applied from a Windows (CRLF) checkout, now running from an LF checkout.
+    await set(hash(sql.replace(/\n/g, '\r\n')))
+    await migrate(pool)
+    await set(hash(`${sql}-- edited\n`))
+    await assert.rejects(migrate(pool), /Migration checksum changed: 001_control\.sql/)
+  } finally {
+    await set(hash(sql))
+  }
+})

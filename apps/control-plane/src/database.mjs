@@ -37,13 +37,19 @@ export async function migrate(pool) {
       'CREATE TABLE IF NOT EXISTS public.platform_migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())'
     )
     for (const name of (await readdir(root)).filter((n) => n.endsWith('.sql')).sort()) {
-      const sql = await readFile(`${root}/${name}`, 'utf8')
+      // Line endings depend on how the repository was checked out (Windows clones
+      // may use CRLF), so checksums compare LF-normalized text and accept either.
+      const sql = (await readFile(`${root}/${name}`, 'utf8')).replace(/\r\n/g, '\n')
       const { rows } = await db.query(
         'SELECT checksum FROM public.platform_migrations WHERE name=$1',
         [name]
       )
       if (rows.length) {
-        invariant(rows[0].checksum === hash(sql), 500, 'Migration checksum changed')
+        invariant(
+          [hash(sql), hash(sql.replace(/\n/g, '\r\n'))].includes(rows[0].checksum),
+          500,
+          `Migration checksum changed: ${name}`
+        )
         continue
       }
       await db.query(sql)
