@@ -57,13 +57,52 @@ function button(text, action) {
   })
   return node
 }
+const operationLabels = {
+  start: 'Resume',
+  stop: 'Pause',
+  restart: 'Restart',
+  backup: 'Backup',
+  restore: 'Restore',
+  delete: 'Delete',
+  resize: 'Resize',
+  inspect: 'Refresh',
+}
 async function operation(project, kind, extra = {}) {
   const result = await api(`/api/projects/${project.id}/operations`, {
     method: 'POST',
     body: JSON.stringify({ kind, ...extra }),
   })
-  notice(`${kind} queued. Operation ${result.id}.`)
+  const label = operationLabels[kind] ?? kind
+  notice(`${label} started. This page updates when it finishes.`)
   await loadProjects(true)
+  trackOperation(project, result.id, label)
+}
+// Follows a queued operation until it finishes, then reports the result and refreshes
+// the open project so its buttons and status match the new state.
+async function trackOperation(project, id, label) {
+  for (let attempt = 0; attempt < 240; attempt++) {
+    await new Promise((done) => setTimeout(done, 3000))
+    let row
+    try {
+      row = (await api(`/api/projects/${project.id}/operations`)).find((op) => op.id === id)
+    } catch {
+      continue
+    }
+    if (!row || ['queued', 'running'].includes(row.state)) continue
+    notice(
+      row.state === 'succeeded'
+        ? `${label} finished.`
+        : `${label} failed (${row.error_code ?? 'unknown error'}). Check the worker logs for details.`
+    )
+    await loadProjects(true).catch(() => {})
+    if (selected === project.id && $('detail-dialog').open)
+      try {
+        await detail(await api(`/api/projects/${project.id}`))
+      } catch (error) {
+        if (error.status === 404) $('detail-dialog').close()
+      }
+    return
+  }
 }
 function confirm(project, kind, extra = {}) {
   $('confirm-form').reset()
@@ -166,7 +205,7 @@ async function renderOverview(project, root) {
   for (const line of [
     `Project ID: ${project.id}`,
     `API URL: ${project.apiUrl}`,
-    `Status: ${project.status}`,
+    `Status: ${project.status === 'stopped' ? 'paused' : project.status}`,
     `Allocation: ${project.memoryMb} MiB / ${project.cpus} CPU`,
     `Last observed: ${project.lastObservedAt ?? 'Not observed yet'}`,
     ...(project.databaseUrl ? [`Database (session pooler): ${project.databaseUrl}`] : []),
@@ -179,19 +218,23 @@ async function renderOverview(project, root) {
   const canOperate = ['owner', 'operator'].includes(project.role)
   if (canOperate) {
     const actions = element('div', '', 'flex flex-wrap gap-2')
-    actions.append(
-      button('Open Studio', async () => {
-        const ticket = await api(`/api/projects/${project.id}/studio-ticket`, {
-          method: 'POST',
-          body: '{}',
-        })
-        location.assign(ticket.url)
-      })
-    )
-    for (const kind of ['start', 'stop', 'restart', 'backup'])
+    const isRunning = project.desiredState === 'running'
+    // A paused project has no running Studio to open.
+    if (isRunning)
       actions.append(
-        button(`${kind[0].toUpperCase()}${kind.slice(1)}`, () => operation(project, kind))
+        button('Open Studio', async () => {
+          const ticket = await api(`/api/projects/${project.id}/studio-ticket`, {
+            method: 'POST',
+            body: '{}',
+          })
+          location.assign(ticket.url)
+        })
       )
+    // Paused projects keep their data; only the actions that apply are shown.
+    const lifecycle = isRunning ? ['stop', 'restart'] : ['start']
+    for (const kind of lifecycle)
+      actions.append(button(operationLabels[kind], () => operation(project, kind)))
+    actions.append(button('Back up now', () => operation(project, 'backup')))
     actions.append(
       button('Show credentials', async () => {
         const credentials = await api(`/api/projects/${project.id}/secrets`, {
