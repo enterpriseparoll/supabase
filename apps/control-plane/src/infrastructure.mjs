@@ -97,7 +97,8 @@ export class Infrastructure {
     const compose = parse(
       renderCompose(
         await readFile(`${this.config.templateRoot}/docker-compose.yml`, 'utf8'),
-        project
+        project,
+        { local: this.config.local }
       )
     )
     // A platform Studio build adds the cross-project switcher; stock Studio still works.
@@ -325,7 +326,7 @@ export class Infrastructure {
     )
     await writeFile(
       `${this.directory(project.id)}/docker-compose.yml`,
-      renderCompose(composeSource, { ...project, release }),
+      renderCompose(composeSource, { ...project, release }, { local: this.config.local }),
       { mode: 0o600 }
     )
     await writeFile(

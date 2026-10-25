@@ -273,3 +273,12 @@ test('custom Studio image setting is validated', async () => {
     /PLATFORM_STUDIO_IMAGE/
   )
 })
+test('health checks get a start-up grace and local mode keeps a CPU floor', async () => {
+  const source = await readFile(new URL('docker-compose.yml', root), 'utf8')
+  const server = parse(renderCompose(source, project))
+  const local = parse(renderCompose(source, project, { local: true }))
+  assert.equal(server.services.storage.healthcheck.start_period, '120s')
+  assert(server.services.storage.cpus < 0.5, 'servers keep strict per-project CPU shares')
+  for (const service of Object.values(local.services)) assert(service.cpus >= 0.5)
+  assert.equal(local.services.db.cpus, server.services.db.cpus)
+})

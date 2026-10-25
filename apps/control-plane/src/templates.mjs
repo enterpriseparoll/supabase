@@ -2,7 +2,7 @@ import { parse, stringify } from 'yaml'
 import { invariant, projectId, publicUrl } from './core.mjs'
 
 export const projectName = (id) => `sp-${projectId(id)}`
-export function renderCompose(source, project) {
+export function renderCompose(source, project, { local = false } = {}) {
   const compose = parse(source)
   const name = projectName(project.id)
   compose.name = name
@@ -21,6 +21,13 @@ export function renderCompose(source, project) {
     service.mem_limit = `${Math.floor((project.memory_mb * weight) / total)}m`
     service.memswap_limit = service.mem_limit
     service.cpus = Number(((Number(project.cpus) * weight) / total).toFixed(3))
+    // Strict shares leave small services ~0.1 CPU, so first boots outlast their
+    // health checks. A laptop can oversubscribe: give every service half a CPU.
+    if (local) service.cpus = Math.max(service.cpus, 0.5)
+    // Throttled first starts (migrations, JIT warm-up) must not count as failures,
+    // or `compose up --wait` aborts while services are still booting.
+    if (service.healthcheck && !service.healthcheck.disable)
+      service.healthcheck.start_period = '120s'
     service.pids_limit = key === 'db' ? 1024 : 512
     service.security_opt = ['no-new-privileges:true']
     service.cap_drop = ['NET_RAW', 'NET_ADMIN']
