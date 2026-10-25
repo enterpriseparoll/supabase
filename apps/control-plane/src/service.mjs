@@ -31,6 +31,10 @@ export const publicProject = (row, config) => ({
   createdAt: row.created_at,
   release: row.release,
   role: row.effective_role,
+  // Local mode publishes the pooler on 127.0.0.1; servers keep databases private.
+  databaseUrl: config.local
+    ? `postgresql://postgres.${row.id}:[YOUR-PASSWORD]@localhost:${row.db_port}/postgres`
+    : null,
 })
 export async function projectAccess(db, subject, id, action, includeDeleted = false) {
   projectId(id)
@@ -102,8 +106,14 @@ export async function createProject(pool, config, actor, input, key) {
       'Host capacity exceeded. Add capacity or reduce the allocation.'
     )
     const id = `p${randomBytes(12).toString('hex')}`
+    // Two consecutive pooler ports per project (session, transaction). Allocation is
+    // serialized by the advisory lock above; ports are never reused.
+    const dbPort = (
+      await db.query('SELECT COALESCE(max(db_port), 55430) + 2 AS port FROM control.projects')
+    ).rows[0].port
+    invariant(dbPort <= 65534, 409, 'No database ports are left for new projects')
     await db.query(
-      'INSERT INTO control.projects(id,name,site_url,memory_mb,cpus,encrypted_secrets,release) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      'INSERT INTO control.projects(id,name,site_url,memory_mb,cpus,encrypted_secrets,release,db_port) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
       [
         id,
         values.name,
@@ -112,6 +122,7 @@ export async function createProject(pool, config, actor, input, key) {
         values.cpus,
         seal(generateSecrets(), config.key, id),
         config.release,
+        dbPort,
       ]
     )
     await db.query(

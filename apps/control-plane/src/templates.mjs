@@ -39,6 +39,21 @@ export function renderCompose(source, project, { local = false } = {}) {
     ingress: { name: `${name}-ingress`, internal: true },
     egress: { name: `${name}-egress` },
   }
+  // Studio shows the tenant user and, locally, the published pooler in Connect.
+  Object.assign(compose.services.studio.environment, {
+    POOLER_TENANT_ID: '${POOLER_TENANT_ID}',
+    POOLER_PUBLIC_HOST: '${POOLER_PUBLIC_HOST}',
+    POOLER_PUBLIC_PORT: '${POOLER_PUBLIC_PORT}',
+  })
+  if (local && project.db_port) {
+    // Session and transaction pooling on this machine only. Publishing needs a
+    // non-internal network; the database itself stays on the private network.
+    compose.services.supavisor.ports = [
+      `127.0.0.1:${project.db_port}:5432`,
+      `127.0.0.1:${project.db_port + 1}:6543`,
+    ]
+    compose.services.supavisor.networks.egress = {}
+  }
   compose.services.auth.environment.GOTRUE_JWT_KEYS = '${JWT_KEYS}'
   compose.services.rest.environment.PGRST_JWT_SECRET = '${JWT_JWKS}'
   compose.services.realtime.environment.API_JWT_JWKS = '${JWT_JWKS}'
@@ -101,6 +116,8 @@ export function projectEnvironment(project, secrets, config) {
     STUDIO_DEFAULT_ORGANIZATION: 'Self-hosted platform',
     STUDIO_DEFAULT_PROJECT: project.name,
     POOLER_TENANT_ID: project.id,
+    POOLER_PUBLIC_HOST: config.local && project.db_port ? 'localhost' : '',
+    POOLER_PUBLIC_PORT: config.local && project.db_port ? String(project.db_port) : '',
     STORAGE_TENANT_ID: project.id,
     ENABLE_PHONE_SIGNUP: 'false',
     ENABLE_PHONE_AUTOCONFIRM: 'false',

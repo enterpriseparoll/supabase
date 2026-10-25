@@ -282,3 +282,26 @@ test('health checks get a start-up grace and local mode keeps a CPU floor', asyn
   for (const service of Object.values(local.services)) assert(service.cpus >= 0.5)
   assert.equal(local.services.db.cpus, server.services.db.cpus)
 })
+test('local mode publishes each project pooler on its own loopback ports', async () => {
+  const source = await readFile(new URL('docker-compose.yml', root), 'utf8')
+  const withPort = { ...project, db_port: 55432 }
+  const local = parse(renderCompose(source, withPort, { local: true }))
+  assert.deepEqual(local.services.supavisor.ports, ['127.0.0.1:55432:5432', '127.0.0.1:55433:6543'])
+  assert('egress' in local.services.supavisor.networks)
+  assert.deepEqual(Object.keys(local.services.db.networks), ['private'])
+  for (const [name, service] of Object.entries(local.services))
+    if (name !== 'supavisor') assert.equal(service.ports, undefined)
+  assert.equal(local.services.studio.environment.POOLER_PUBLIC_PORT, '${POOLER_PUBLIC_PORT}')
+  const server = parse(renderCompose(source, withPort))
+  assert.equal(server.services.supavisor.ports, undefined, 'servers never publish databases')
+  const localEnv = projectEnvironment(
+    withPort,
+    {},
+    { local: true, publicPort: 8090, baseDomain: 'localhost' }
+  )
+  assert.equal(localEnv.POOLER_PUBLIC_HOST, 'localhost')
+  assert.equal(localEnv.POOLER_PUBLIC_PORT, '55432')
+  assert.equal(localEnv.POOLER_TENANT_ID, id)
+  const serverEnv = projectEnvironment(withPort, {}, { baseDomain: 'platform.example.com' })
+  assert.equal(serverEnv.POOLER_PUBLIC_PORT, '')
+})

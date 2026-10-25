@@ -649,3 +649,27 @@ test('resizing reserves capacity against other projects and restarts with new li
     'ready'
   )
 })
+test('projects get unique, consecutive pooler port pairs', async () => {
+  const roomy = { ...config, local: true, capacityMb: 1048576, capacityCpus: 1024 }
+  const a = await createProject(pool, roomy, 'owner', input, 'ports-alpha')
+  const b = await createProject(pool, roomy, 'owner', input, 'ports-bravo')
+  const ports = (
+    await pool.query('SELECT id, db_port FROM control.projects WHERE id = ANY($1)', [
+      [a.project_id, b.project_id],
+    ])
+  ).rows
+  const [first, second] = [a, b].map((op) => ports.find((row) => row.id === op.project_id).db_port)
+  assert.equal(second - first, 2)
+  const nulls = (
+    await pool.query('SELECT count(*)::int AS n FROM control.projects WHERE db_port IS NULL')
+  ).rows[0].n
+  assert.equal(nulls, 0)
+  const listed = await projectAccess(pool, 'owner', a.project_id, 'read')
+  assert.equal(listed.db_port, first)
+  const { projects } = await listProjects(pool, roomy, 'owner')
+  const shown = projects.find((row) => row.id === a.project_id)
+  assert.equal(
+    shown.databaseUrl,
+    `postgresql://postgres.${a.project_id}:[YOUR-PASSWORD]@localhost:${first}/postgres`
+  )
+})

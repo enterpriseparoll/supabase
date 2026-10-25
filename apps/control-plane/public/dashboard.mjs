@@ -135,8 +135,9 @@ async function detail(project) {
     `Status: ${project.status}`,
     `Allocation: ${project.memoryMb} MiB / ${project.cpus} CPU`,
     `Last observed: ${project.lastObservedAt ?? 'Not observed yet'}`,
+    ...(project.databaseUrl ? [`Database (session pooler): ${project.databaseUrl}`] : []),
   ])
-    metadata.append(element('p', line))
+    metadata.append(element('p', line, 'break-all'))
   root.append(metadata)
   root.append(
     button('Refresh status', async () => detail(await api(`/api/projects/${project.id}`)))

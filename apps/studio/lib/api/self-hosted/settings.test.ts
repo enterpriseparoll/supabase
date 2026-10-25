@@ -126,4 +126,29 @@ describe('api/self-hosted/settings', () => {
       expect(settings.inserted_at).toBe('2021-08-02T06:40:40.646Z')
     })
   })
+
+  describe('published pooler details', () => {
+    it('reports the tenant user, host, and port when the host provides them', async () => {
+      vi.stubEnv('POOLER_TENANT_ID', 'p4eb6d2ee001a0adebc7ac563')
+      vi.stubEnv('POOLER_PUBLIC_HOST', 'localhost')
+      vi.stubEnv('POOLER_PUBLIC_PORT', '55432')
+      try {
+        const settings = getProjectSettings()
+        expect(settings.db_user).toBe('postgres.p4eb6d2ee001a0adebc7ac563')
+        expect(settings.db_host).toBe('localhost')
+        expect(settings.db_port).toBe(55432)
+      } finally {
+        vi.unstubAllEnvs()
+      }
+    })
+
+    it('ignores an invalid published port', () => {
+      vi.stubEnv('POOLER_PUBLIC_PORT', 'not-a-port')
+      try {
+        expect(getProjectSettings().db_port).toBe(5432)
+      } finally {
+        vi.unstubAllEnvs()
+      }
+    })
+  })
 })
