@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
+import { diffLines } from './insights.mjs'
 import { audit, roleFor, transaction } from './database.mjs'
 import {
   allocationInput,
@@ -25,6 +26,8 @@ export const publicProject = (row, config) => ({
   studioUrl: publicUrl(config, `${row.id}.studio.${config.baseDomain}`),
   siteUrl: row.site_url,
   memoryMb: row.memory_mb,
+  backupIntervalHours: row.backup_interval_hours,
+  backupRetention: row.backup_retention,
   cpus: Number(row.cpus),
   metrics: row.metrics,
   lastObservedAt: row.last_observed_at,
@@ -147,6 +150,7 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
       'rollback',
       'recover',
       'resize',
+      'inspect',
     ].includes(kind),
     400,
     'Unsupported operation'
@@ -291,5 +295,104 @@ export async function addDomain(pool, config, actor, id, value) {
     ).rows[0]
     await audit(db, actor, 'project.domain.added', id, { domain })
     return row
+  })
+}
+
+export async function projectInsights(db, actor, id) {
+  await projectAccess(db, actor, id, 'read')
+  const row = (
+    await db.query(
+      'SELECT migrations, performance, collected_at, error_code FROM control.project_insights WHERE project_id=$1',
+      [id]
+    )
+  ).rows[0]
+  return {
+    collectedAt: row?.collected_at ?? null,
+    errorCode: row?.error_code ?? null,
+    migrations: row?.migrations ?? null,
+    performance: row?.performance ?? null,
+  }
+}
+export async function projectStats(db, actor, id, hours = 24) {
+  invariant(Number.isInteger(hours) && hours >= 1 && hours <= 168, 400, 'Hours must be 1–168')
+  await projectAccess(db, actor, id, 'read')
+  return (
+    await db.query(
+      `SELECT collected_at AS "collectedAt", sample FROM control.project_stats
+       WHERE project_id=$1 AND collected_at > now() - ($2 * interval '1 hour')
+       ORDER BY collected_at`,
+      [id, hours]
+    )
+  ).rows
+}
+export async function schemaSnapshots(db, actor, id) {
+  await projectAccess(db, actor, id, 'read')
+  return (
+    await db.query(
+      `SELECT id, hash, size_bytes AS "sizeBytes", created_at AS "createdAt"
+       FROM control.schema_snapshots WHERE project_id=$1 ORDER BY created_at DESC LIMIT 100`,
+      [id]
+    )
+  ).rows
+}
+const snapshotId = (value) => {
+  invariant(
+    typeof value === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value),
+    400,
+    'Select two schema snapshots to compare'
+  )
+  return value
+}
+// Compares two snapshots, of one project over time or of two projects. The caller
+// needs read access to every project involved.
+export async function schemaDiff(db, actor, fromId, toId) {
+  const ids = [snapshotId(fromId), snapshotId(toId)]
+  const rows = (
+    await db.query(
+      `SELECT s.id, s.project_id, s.content, s.created_at, p.name
+       FROM control.schema_snapshots s JOIN control.projects p ON p.id = s.project_id
+       WHERE s.id = ANY($1::uuid[])`,
+      [ids]
+    )
+  ).rows
+  const [from, to] = ids.map((value) => rows.find((row) => row.id === value))
+  invariant(from && to, 404, 'Schema snapshot not found')
+  for (const project of new Set([from.project_id, to.project_id]))
+    await projectAccess(db, actor, project, 'read')
+  invariant(
+    from.content.length + to.content.length <= 4 * 1024 * 1024,
+    413,
+    'Schemas are too large to compare here'
+  )
+  const describe = (row) => ({
+    id: row.id,
+    projectId: row.project_id,
+    projectName: row.name,
+    createdAt: row.created_at,
+  })
+  return { from: describe(from), to: describe(to), ...diffLines(from.content, to.content) }
+}
+export async function updateBackupSettings(pool, actor, id, input) {
+  invariant(input && typeof input === 'object', 400, 'Expected backup settings')
+  const { intervalHours, retention } = input
+  invariant(
+    Number.isInteger(intervalHours) && intervalHours >= 0 && intervalHours <= 720,
+    400,
+    'Backup interval must be 0 (off) to 720 hours'
+  )
+  invariant(
+    Number.isInteger(retention) && retention >= 1 && retention <= 365,
+    400,
+    'Keep between 1 and 365 backups'
+  )
+  return transaction(pool, async (db) => {
+    await projectAccess(db, actor, id, 'operate')
+    await db.query(
+      'UPDATE control.projects SET backup_interval_hours=$2, backup_retention=$3 WHERE id=$1',
+      [id, intervalHours, retention]
+    )
+    await audit(db, actor, 'project.backup_settings.updated', id, { intervalHours, retention })
+    return { intervalHours, retention }
   })
 }

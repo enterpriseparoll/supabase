@@ -15,6 +15,13 @@ import { randomUUID } from 'node:crypto'
 import { Resolver } from 'node:dns/promises'
 import { parse, stringify } from 'yaml'
 import { hash, invariant, projectId, unseal } from './core.mjs'
+import {
+  collectInsights,
+  RESTORE_SQL,
+  restoreSwapPlan,
+  schemaHash,
+  statsSample,
+} from './insights.mjs'
 import { command } from './process.mjs'
 import {
   projectEnvironment,
@@ -381,29 +388,135 @@ export class Infrastructure {
       ),
     }
   }
-  async backup(project) {
+  // Runs a command inside the project's database container as supabase_admin over
+  // loopback. The password travels in the environment, never in argv.
+  dbExec(project, args, options = {}) {
+    const secrets = unseal(project.encrypted_secrets, this.config.key, project.id)
+    return this.compose(
+      project,
+      ['exec', '-T', '-e', 'PGPASSWORD', '-e', 'PGOPTIONS', 'db', ...args],
+      {
+        timeout: 120000,
+        ...options,
+        env: {
+          ...process.env,
+          PGPASSWORD: secrets.POSTGRES_PASSWORD,
+          PGOPTIONS: options.pgOptions ?? '-c statement_timeout=30000',
+        },
+      }
+    )
+  }
+  psql(project, sql, database = 'postgres') {
+    return this.dbExec(project, [
+      'psql',
+      '-h',
+      '127.0.0.1',
+      '-U',
+      'supabase_admin',
+      '-d',
+      database,
+      '-X',
+      '-q',
+      '-A',
+      '-t',
+      '-v',
+      'ON_ERROR_STOP=1',
+      ...(Array.isArray(sql) ? sql : [sql]).flatMap((statement) => ['-c', statement]),
+    ])
+  }
+  // Migration history, schema snapshot, and performance statistics. Only the worker
+  // reaches project databases; the API serves what is stored here.
+  async inspect(project) {
+    const insights = await collectInsights({
+      query: (sql) => this.psql(project, sql),
+      dumpSchema: (schemas) =>
+        this.dbExec(project, [
+          'pg_dump',
+          '-h',
+          '127.0.0.1',
+          '-U',
+          'supabase_admin',
+          '-d',
+          'postgres',
+          '--schema-only',
+          '--no-owner',
+          ...schemas.flatMap((name) => ['-n', `"${name.replaceAll('"', '""')}"`]),
+        ]),
+    })
+    const hash = schemaHash(insights.schema)
+    const latest = (
+      await this.db.query(
+        'SELECT hash FROM control.schema_snapshots WHERE project_id=$1 ORDER BY created_at DESC LIMIT 1',
+        [project.id]
+      )
+    ).rows[0]
+    if (latest?.hash !== hash)
+      await this.db.query(
+        'INSERT INTO control.schema_snapshots(id,project_id,content,hash,size_bytes) VALUES($1,$2,$3,$4,$5)',
+        [randomUUID(), project.id, insights.schema, hash, Buffer.byteLength(insights.schema)]
+      )
+    await this.db.query(
+      `INSERT INTO control.project_insights(project_id,migrations,performance,collected_at,error_code)
+       VALUES($1,$2,$3,now(),NULL)
+       ON CONFLICT (project_id) DO UPDATE SET migrations=excluded.migrations,
+         performance=excluded.performance, collected_at=excluded.collected_at, error_code=NULL`,
+      [project.id, JSON.stringify(insights.migrations), JSON.stringify(insights.performance)]
+    )
+    await this.db.query('INSERT INTO control.project_stats(project_id,sample) VALUES($1,$2)', [
+      project.id,
+      statsSample(insights.performance),
+    ])
+    await this.db.query(
+      "DELETE FROM control.project_stats WHERE project_id=$1 AND collected_at < now() - interval '7 days'",
+      [project.id]
+    )
+    return insights
+  }
+  async ensureRepository() {
     invariant(
       process.env.RESTIC_REPOSITORY && process.env.RESTIC_PASSWORD_FILE,
       503,
       'BACKUPS_NOT_CONFIGURED'
     )
+    try {
+      await command('restic', ['cat', 'config'], { timeout: 60000 })
+    } catch {
+      // A missing local repository is created on first use; remote ones must exist.
+      invariant(
+        !/^[a-z0-9]+:/i.test(process.env.RESTIC_REPOSITORY),
+        503,
+        'BACKUP_REPOSITORY_UNAVAILABLE'
+      )
+      await mkdir(process.env.RESTIC_REPOSITORY, { recursive: true, mode: 0o700 })
+      await command('restic', ['init'], { timeout: 120000 })
+    }
+  }
+  // Online backup: pg_dump takes a consistent snapshot while the project runs, so
+  // scheduled backups cause no downtime. Storage files are copied alongside.
+  async backup(project, trigger = 'manual') {
+    await this.ensureRepository()
     const id = randomUUID()
     const staging = resolve(this.config.dataRoot, 'backup-staging', `${project.id}-${id}`)
     await mkdir(staging, { recursive: true, mode: 0o700 })
-    const wasRunning = project.desired_state === 'running'
-    await this.stop(project)
+    const stopped = project.desired_state !== 'running'
     try {
-      // PostgreSQL alone runs while application writes and webhooks are quiesced.
-      await this.compose(project, ['up', '-d', '--wait', 'db'])
+      if (stopped) await this.compose(project, ['up', '-d', '--wait', 'db'])
       for (const [file, args] of [
-        ['database.dump', ['pg_dump', '-U', 'postgres', '-d', 'postgres', '-Fc']],
-        ['globals.sql', ['pg_dumpall', '-U', 'postgres', '--globals-only']],
+        [
+          'database.dump',
+          ['pg_dump', '-h', '127.0.0.1', '-U', 'supabase_admin', '-d', 'postgres', '-Fc'],
+        ],
+        [
+          'globals.sql',
+          ['pg_dumpall', '-h', '127.0.0.1', '-U', 'supabase_admin', '--globals-only'],
+        ],
       ]) {
         const handle = await open(`${staging}/${file}`, 'w', 0o600)
         try {
-          await this.compose(project, ['exec', '-T', 'db', ...args], {
+          await this.dbExec(project, args, {
             stdout: handle.fd,
             timeout: 1800000,
+            pgOptions: '-c statement_timeout=0',
           })
         } finally {
           await handle.close()
@@ -412,19 +525,19 @@ export class Infrastructure {
       await cp(`${this.directory(project.id)}/volumes/storage`, `${staging}/storage`, {
         recursive: true,
       })
-      await cp(`${this.directory(project.id)}/.env`, `${staging}/project.env`)
       await writeFile(
         `${staging}/manifest.json`,
         JSON.stringify({
-          version: 1,
+          version: 2,
           project: project.id,
           release: project.release,
           createdAt: new Date().toISOString(),
-          consistent: 'application-services-stopped',
+          consistent: 'pg_dump-snapshot',
+          trigger,
         }),
         { mode: 0o600 }
       )
-      // stdin-from-command is avoided; restic encrypts the files before remote upload.
+      // restic encrypts and deduplicates; repeated backups store only changed data.
       const output = await command(
         'restic',
         ['backup', staging, '--json', '--tag', project.id, '--tag', id],
@@ -437,15 +550,43 @@ export class Infrastructure {
         .find((row) => row.message_type === 'summary')
       invariant(summary?.snapshot_id, 500, 'BACKUP_SNAPSHOT_MISSING')
       await this.db.query(
-        'INSERT INTO control.backups(id,project_id,snapshot,source_path,release) VALUES($1,$2,$3,$4,$5)',
-        [id, project.id, summary.snapshot_id, staging, project.release]
+        'INSERT INTO control.backups(id,project_id,snapshot,source_path,release,size_bytes,trigger) VALUES($1,$2,$3,$4,$5,$6,$7)',
+        [
+          id,
+          project.id,
+          summary.snapshot_id,
+          staging,
+          project.release,
+          summary.total_bytes_processed ?? null,
+          trigger,
+        ]
       )
+      await this.applyRetention(project)
     } finally {
       await rm(staging, { recursive: true, force: true })
-      if (wasRunning) await this.up(project)
-      else await this.compose(project, ['stop', 'db'])
+      if (stopped) await this.compose(project, ['stop', 'db'])
     }
   }
+  // Keeps the newest `backup_retention` backups (pre-restore safety copies count too).
+  async applyRetention(
+    project,
+    forget = (snapshots) =>
+      command('restic', ['forget', '--prune', ...snapshots], { timeout: 3600000 })
+  ) {
+    const expired = (
+      await this.db.query(
+        'SELECT id, snapshot FROM control.backups WHERE project_id=$1 ORDER BY created_at DESC OFFSET $2',
+        [project.id, project.backup_retention ?? 7]
+      )
+    ).rows
+    if (!expired.length) return
+    await forget(expired.map((row) => row.snapshot))
+    await this.db.query('DELETE FROM control.backups WHERE id = ANY($1::uuid[])', [
+      expired.map((row) => row.id),
+    ])
+  }
+  // Rebuilds the project database from a backup. A safety backup is taken first, and
+  // the Storage directory being replaced is kept beside the restored one.
   async restore(project, backupId) {
     const backup = (
       await this.db.query('SELECT * FROM control.backups WHERE id=$1 AND project_id=$2', [
@@ -454,7 +595,7 @@ export class Infrastructure {
       ])
     ).rows[0]
     invariant(backup && backup.release === project.release, 409, 'BACKUP_RELEASE_MISMATCH')
-    await this.backup(project)
+    await this.backup(project, 'pre-restore')
     const staging = resolve(
       this.config.dataRoot,
       'restore-staging',
@@ -481,31 +622,56 @@ export class Infrastructure {
         'db:/tmp/platform-restore.dump',
       ])
       try {
-        await this.compose(
-          project,
-          [
-            'exec',
-            '-T',
-            'db',
-            'pg_restore',
-            '-U',
-            'postgres',
-            '-d',
-            'postgres',
-            '--clean',
-            '--if-exists',
-            '--no-owner',
-            '--exit-on-error',
-            '/tmp/platform-restore.dump',
-          ],
-          { timeout: 1800000 }
-        )
+        // Restore into a new database and swap it in only after it fully succeeds, so
+        // a failed restore leaves the live database untouched. Supabase's own schemas
+        // (auth, storage, ...) cannot be cleaned in place, and roles live outside it.
+        await this.psql(project, RESTORE_SQL.prepare, 'template1')
+        try {
+          await this.dbExec(
+            project,
+            [
+              'pg_restore',
+              '-h',
+              '127.0.0.1',
+              '-U',
+              'supabase_admin',
+              '-d',
+              'postgres_restoring',
+              '--exit-on-error',
+              '/tmp/platform-restore.dump',
+            ],
+            { timeout: 3600000, pgOptions: '-c statement_timeout=0' }
+          )
+        } catch (error) {
+          await this.psql(project, RESTORE_SQL.discard, 'template1')
+          throw error
+        }
+        await this.psql(project, RESTORE_SQL.copySettings, 'template1')
+        // Background workers (pg_cron, pg_net) reconnect briefly; retry the swap. Each
+        // attempt plans only the steps still needed, so retries never drop the original.
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await this.psql(project, RESTORE_SQL.terminate, 'template1')
+            const existing = (await this.psql(project, RESTORE_SQL.existing, 'template1'))
+              .trim()
+              .split(',')
+              .filter(Boolean)
+            const steps = restoreSwapPlan(existing)
+            if (steps.length) await this.psql(project, steps, 'template1')
+            break
+          } catch (error) {
+            if (attempt >= 5) throw error
+            await new Promise((done) => setTimeout(done, 2000))
+          }
+        }
       } finally {
         await this.compose(project, ['exec', '-T', 'db', 'rm', '-f', '/tmp/platform-restore.dump'])
       }
       const storage = `${this.directory(project.id)}/volumes/storage`
-      // Keep a local previous copy if restore or application verification fails.
-      await rename(storage, `${storage}.before-${randomUUID()}`)
+      await rename(
+        storage,
+        `${storage}.before-restore-${new Date().toISOString().replaceAll(':', '-')}`
+      )
       await cp(`${staging}/storage`, storage, { recursive: true })
       if (project.desired_state === 'running') await this.up(project)
       else await this.compose(project, ['stop', 'db'])

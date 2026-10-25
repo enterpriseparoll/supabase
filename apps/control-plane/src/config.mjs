@@ -67,5 +67,6 @@ export async function configuration(env = process.env) {
     capacityMb: Number(env.HOST_CAPACITY_MB ?? 12288),
     capacityCpus: Number(env.HOST_CAPACITY_CPUS ?? 3),
     backupHours: Number(env.BACKUP_INTERVAL_HOURS ?? 24),
+    insightsMinutes: Number(env.INSIGHTS_INTERVAL_MINUTES ?? 5),
   }
 }

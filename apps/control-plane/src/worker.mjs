@@ -11,6 +11,7 @@ const safeErrorCodes = new Set([
   'COMMAND_TIMEOUT',
   'COMMAND_OUTPUT_LIMIT',
   'BACKUPS_NOT_CONFIGURED',
+  'BACKUP_REPOSITORY_UNAVAILABLE',
   'DOMAIN_NOT_FOUND',
   'DOMAIN_NOT_VERIFIED',
   'BACKUP_RELEASE_MISMATCH',
@@ -97,7 +98,12 @@ export async function runOne(pool, config, infrastructure) {
           await infrastructure.up(project)
         } else if (kind === 'stop') await infrastructure.stop(project)
         else if (kind === 'delete') await infrastructure.destroy(project)
-        else if (kind === 'backup') await infrastructure.backup(project)
+        else if (kind === 'backup')
+          await infrastructure.backup(
+            project,
+            operation.actor === '@scheduler' ? 'scheduled' : 'manual'
+          )
+        else if (kind === 'inspect') await recordInspection(db, infrastructure, project)
         else if (kind === 'restore')
           await infrastructure.restore(project, operation.payload.backupId)
         else if (kind === 'verify-domain')
@@ -205,7 +211,28 @@ export async function runOne(pool, config, infrastructure) {
   }
   return false
 }
-export async function observe(pool, infrastructure) {
+// Collects insights and records a failure instead of throwing, so a broken collector
+// never marks the project unhealthy.
+async function recordInspection(db, infrastructure, project) {
+  try {
+    await infrastructure.inspect(project)
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: 'inspection.failed',
+        project: project.id,
+        step: error.step,
+        ...(infrastructure.config?.local ? { detail: error.stderr || error.message } : {}),
+      })
+    )
+    await db.query(
+      `INSERT INTO control.project_insights(project_id,error_code,collected_at) VALUES($1,'INSPECTION_FAILED',now())
+       ON CONFLICT (project_id) DO UPDATE SET error_code='INSPECTION_FAILED', collected_at=now()`,
+      [project.id]
+    )
+  }
+}
+export async function observe(pool, infrastructure, config = {}) {
   const projects = (
     await pool.query(
       "SELECT * FROM control.projects WHERE status IN ('ready','error') AND desired_state='running' ORDER BY last_observed_at NULLS FIRST LIMIT 20"
@@ -231,6 +258,15 @@ export async function observe(pool, infrastructure) {
           // Recreating Traefik drops networks joined at runtime; rejoin before routing.
           await infrastructure.attachIngress(project)
           await infrastructure.route(project)
+          const insights = (
+            await db.query(
+              'SELECT collected_at FROM control.project_insights WHERE project_id=$1',
+              [project.id]
+            )
+          ).rows[0]
+          const due = (config.insightsMinutes ?? 5) * 60000
+          if (!insights?.collected_at || Date.now() - new Date(insights.collected_at) >= due)
+            await recordInspection(db, infrastructure, project)
         } else await infrastructure.unroute(project)
       } catch {
         await db.query(
@@ -245,19 +281,23 @@ export async function observe(pool, infrastructure) {
     }
   }
 }
-export async function scheduleBackups(pool, config) {
+// Queues a backup for each project whose own interval has elapsed. Failed attempts
+// also count, so a broken repository is retried once per interval, not every minute.
+export async function scheduleBackups(pool) {
   if (!process.env.RESTIC_REPOSITORY || !process.env.RESTIC_PASSWORD_FILE) return
   const projects = (
     await pool.query(
-      `SELECT p.id FROM control.projects p WHERE p.status IN ('ready','stopped')
-    AND NOT EXISTS(SELECT 1 FROM control.operations o WHERE o.project_id=p.id AND o.kind='backup' AND (o.state IN ('queued','running') OR o.created_at>now()-($1*interval '1 hour')))
-    AND NOT EXISTS(SELECT 1 FROM control.backups b WHERE b.project_id=p.id AND b.created_at>now()-($1*interval '1 hour'))`,
-      [config.backupHours]
+      `SELECT p.id, p.backup_interval_hours AS hours FROM control.projects p
+    WHERE p.status IN ('ready','stopped') AND p.backup_interval_hours > 0
+    AND NOT EXISTS(SELECT 1 FROM control.operations o WHERE o.project_id=p.id AND o.kind='backup'
+      AND (o.state IN ('queued','running') OR o.created_at>now()-(p.backup_interval_hours*interval '1 hour')))
+    AND NOT EXISTS(SELECT 1 FROM control.backups b WHERE b.project_id=p.id
+      AND b.created_at>now()-(p.backup_interval_hours*interval '1 hour'))`
     )
   ).rows
   for (const project of projects)
     await transaction(pool, async (db) => {
-      const key = `scheduled-${project.id}-${Math.floor(Date.now() / (config.backupHours * 3600000))}`
+      const key = `scheduled-${project.id}-${Math.floor(Date.now() / (project.hours * 3600000))}`
       await enqueue(db, {
         actor: '@scheduler',
         project: project.id,
@@ -291,8 +331,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     try {
       await runOne(pool, config, infrastructure)
       if (Date.now() - lastObservation > 60000) {
-        await observe(pool, infrastructure)
-        await scheduleBackups(pool, config)
+        await observe(pool, infrastructure, config)
+        await scheduleBackups(pool)
         await pool.query('DELETE FROM control.sessions WHERE expires_at<now()')
         await pool.query('DELETE FROM control.login_flows WHERE expires_at<now()')
         await pool.query('DELETE FROM control.studio_tickets WHERE expires_at<now()')

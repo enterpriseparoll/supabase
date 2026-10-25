@@ -323,3 +323,93 @@ test('readiness probe uses the keys the public gateway requires', async () => {
   // The probe must be valid JavaScript.
   new Function(`return (async () => { ${readinessProbe.replaceAll('process.exit', 'void')} })`)
 })
+test('schema diff groups distant changes into separate hunks with context', async () => {
+  const { diffLines } = await import('../src/insights.mjs')
+  const before = Array.from({ length: 40 }, (_, i) => `line ${i}`)
+  const after = [...before]
+  after[2] = 'changed near the top'
+  after.splice(30, 0, 'inserted near the end')
+  const diff = diffLines(before.join('\n'), after.join('\n'))
+  assert.equal(diff.added, 2)
+  assert.equal(diff.removed, 1)
+  assert.equal(diff.hunks.length, 2)
+  assert.deepEqual(
+    diff.hunks[0].lines.filter((line) => line.type !== ' '),
+    [
+      { type: '-', text: 'line 2' },
+      { type: '+', text: 'changed near the top' },
+    ]
+  )
+  assert(diff.hunks[0].lines.length <= 2 + 3 * 2, 'at most three context lines each side')
+  assert.equal(diff.hunks[1].fromLine, 28)
+  assert.deepEqual(diffLines('same\ntext', 'same\ntext'), { added: 0, removed: 0, hunks: [] })
+  assert.equal(diffLines('', 'a\nb').added, 2)
+})
+test('schema dumps normalize away per-run noise so identical schemas hash the same', async () => {
+  const { normalizeSchemaDump, schemaHash } = await import('../src/insights.mjs')
+  const dump = (key, version) =>
+    `--\n-- PostgreSQL database dump\n--\n\n\\restrict ${key}\n\n-- Dumped from database version ${version}\n-- Dumped by pg_dump version ${version}\n\nCREATE TABLE public.a (id int);\n\n\n\n\\unrestrict ${key}\n`
+  const first = normalizeSchemaDump(dump('abc', '17.6'))
+  const second = normalizeSchemaDump(dump('xyz', '17.7').replaceAll('\n', '\r\n'))
+  assert.equal(first, second)
+  assert.equal(schemaHash(first), schemaHash(second))
+  assert(!first.includes('restrict') && first.includes('CREATE TABLE public.a'))
+})
+test('restore swap only drops the safety copy while the live database still exists', async () => {
+  const { restoreSwapPlan } = await import('../src/insights.mjs')
+  assert.deepEqual(restoreSwapPlan(['postgres', 'postgres_restoring']), [
+    'ALTER DATABASE postgres RENAME TO postgres_before_restore',
+    'ALTER DATABASE postgres_restoring RENAME TO postgres',
+  ])
+  assert.deepEqual(
+    restoreSwapPlan(['postgres', 'postgres_before_restore', 'postgres_restoring'])[0],
+    'DROP DATABASE postgres_before_restore WITH (FORCE)'
+  )
+  // After a partial swap the original is already renamed: never drop it.
+  assert.deepEqual(restoreSwapPlan(['postgres_before_restore', 'postgres_restoring']), [
+    'ALTER DATABASE postgres_restoring RENAME TO postgres',
+  ])
+  assert.deepEqual(restoreSwapPlan(['postgres', 'postgres_before_restore']), [])
+})
+test('insight collection degrades gracefully when optional pieces are missing', async () => {
+  const { collectInsights, SQL } = await import('../src/insights.mjs')
+  const performance = {
+    database_bytes: 1024,
+    max_connections: 100,
+    connections: { total: 3, active: 1 },
+    counters: { xact_commit: 10, xact_rollback: 1, deadlocks: 0 },
+    cache_hit_ratio: 0.99,
+    tables: [],
+  }
+  const answers = new Map([
+    [SQL.hasMigrationTable, 'false'],
+    [SQL.performance, JSON.stringify(performance)],
+    [SQL.statementsSchema, ''],
+    [SQL.userSchemas, '[]'],
+  ])
+  let dumped = false
+  const result = await collectInsights({
+    query: async (sql) => {
+      assert(answers.has(sql), `unexpected query: ${sql.slice(0, 40)}`)
+      return `${answers.get(sql)}\n`
+    },
+    dumpSchema: async () => {
+      dumped = true
+      return ''
+    },
+  })
+  assert.deepEqual(result.migrations, [])
+  assert.equal(result.performance.top_queries, null)
+  assert.equal(result.schema, '')
+  assert.equal(dumped, false, 'no user schemas means no pg_dump')
+  const { statsSample } = await import('../src/insights.mjs')
+  assert.deepEqual(statsSample(performance), {
+    database_bytes: 1024,
+    connections: 3,
+    active: 1,
+    cache_hit_ratio: 0.99,
+    xact_commit: 10,
+    xact_rollback: 1,
+    deadlocks: 0,
+  })
+})

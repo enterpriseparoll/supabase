@@ -21,6 +21,8 @@ const passwords = { owner: hex(), api: hex(), worker: hex() }
 const wanted = {
   master_key: hex(),
   local_admin_token: randomBytes(24).toString('base64url'),
+  // Encrypts the local backup repository. Losing it makes backups unreadable.
+  restic_password: hex(),
 }
 for (const [role, password] of Object.entries(passwords)) {
   wanted[`db_${role}_password`] = password

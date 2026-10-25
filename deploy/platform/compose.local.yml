@@ -110,6 +110,11 @@ services:
       DATABASE_URL_FILE: /run/secrets/database_url_worker
       ENABLE_DOCKER_WORKER: 'true'
       PLATFORM_IMAGE: supabase-platform:local
+      # Encrypted, deduplicated backups inside the Docker VM. Point this at an
+      # S3-compatible bucket (s3:https://...) to keep copies off this machine.
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-/srv/supabase-platform/backups/restic}
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      INSIGHTS_INTERVAL_MINUTES: ${INSIGHTS_INTERVAL_MINUTES:-5}
     volumes:
       - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets:/run/secrets:ro
       - /var/run/docker.sock:/var/run/docker.sock

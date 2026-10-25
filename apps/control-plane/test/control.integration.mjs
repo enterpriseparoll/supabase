@@ -10,7 +10,9 @@ import {
   requestOperation,
 } from '../src/service.mjs'
 import { hash, token, authorize } from '../src/core.mjs'
-import { runOne } from '../src/worker.mjs'
+import { runOne, scheduleBackups } from '../src/worker.mjs'
+import { Infrastructure } from '../src/infrastructure.mjs'
+import { randomUUID } from 'node:crypto'
 import { managementServer } from '../src/server.mjs'
 
 const url = process.env.CONTROL_TEST_DATABASE_URL
@@ -33,25 +35,19 @@ before(async () => {
   pool = database(url)
   await pool.query('DROP SCHEMA IF EXISTS control CASCADE')
   await pool.query('DROP TABLE IF EXISTS public.platform_migrations')
+  // Like a real install (init-db.sh), the runtime roles exist before migrations run,
+  // so every migration's grants apply to them.
+  if (process.env.CONTROL_TEST_RUNTIME_ROLES === 'true')
+    for (const [role, password] of [
+      ['control_api', 'integration-api'],
+      ['control_worker', 'integration-worker'],
+    ])
+      if (!(await pool.query('SELECT 1 FROM pg_roles WHERE rolname=$1', [role])).rowCount)
+        await pool.query(
+          `CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE`
+        )
   await migrate(pool)
   await migrate(pool)
-  if (process.env.CONTROL_TEST_RUNTIME_ROLES === 'true') {
-    for (const role of ['control_api', 'control_worker']) {
-      if (!(await pool.query('SELECT 1 FROM pg_roles WHERE rolname=$1', [role])).rowCount) {
-        if (role === 'control_api')
-          await pool.query(
-            "CREATE ROLE control_api LOGIN PASSWORD 'integration-api' NOSUPERUSER NOCREATEDB NOCREATEROLE"
-          )
-        else
-          await pool.query(
-            "CREATE ROLE control_worker LOGIN PASSWORD 'integration-worker' NOSUPERUSER NOCREATEDB NOCREATEROLE"
-          )
-      }
-    }
-    // Runtime grants are versioned migration SQL, applied here after test role setup.
-    await pool.query("DELETE FROM public.platform_migrations WHERE name='002_runtime_roles.sql'")
-    await migrate(pool)
-  }
   await pool.query(
     "INSERT INTO control.members(subject,role) VALUES('owner','owner'),('operator','operator'),('viewer','viewer')"
   )
@@ -673,3 +669,277 @@ test('projects get unique, consecutive pooler port pairs', async () => {
     `postgresql://postgres.${a.project_id}:[YOUR-PASSWORD]@localhost:${first}/postgres`
   )
 })
+test('insights, performance history, and schema comparison respect project access', async () => {
+  const roomy = { ...config, capacityMb: 1048576, capacityCpus: 1024 }
+  const a = (await createProject(pool, roomy, 'owner', input, 'insights-alpha')).project_id
+  const b = (await createProject(pool, roomy, 'owner', input, 'insights-bravo')).project_id
+  await pool.query(
+    `INSERT INTO control.project_insights(project_id,migrations,performance,collected_at)
+     VALUES($1,$2,$3,now())`,
+    [
+      a,
+      JSON.stringify([{ version: '20240101000000', name: 'init', statements: 2 }]),
+      JSON.stringify({ database_bytes: 100 }),
+    ]
+  )
+  for (const minutes of [30, 20, 10])
+    await pool.query(
+      "INSERT INTO control.project_stats(project_id,collected_at,sample) VALUES($1, now() - ($2 * interval '1 minute'), $3)",
+      [a, minutes, { connections: minutes }]
+    )
+  await pool.query(
+    "INSERT INTO control.project_stats(project_id,collected_at,sample) VALUES($1, now() - interval '3 days', '{}')",
+    [a]
+  )
+  const snap = async (project, content, minutesAgo) => {
+    const id = randomUUID()
+    await pool.query(
+      "INSERT INTO control.schema_snapshots(id,project_id,content,hash,size_bytes,created_at) VALUES($1,$2,$3,$4,$5, now() - ($6 * interval '1 minute'))",
+      [id, project, content, hash(content), content.length, minutesAgo]
+    )
+    return id
+  }
+  const oldA = await snap(a, 'CREATE TABLE public.courses (id int);', 60)
+  const newA = await snap(
+    a,
+    'CREATE TABLE public.courses (id int, title text);\nCREATE POLICY p ON public.courses;',
+    5
+  )
+  const onlyB = await snap(b, 'CREATE TABLE public.courses (id int);', 5)
+  const cookie = { Cookie: `__Host-platform=${ownerCookie}` }
+  const get = async (path) => {
+    const response = await fetch(`${base}${path}`, { headers: cookie })
+    return { status: response.status, body: await response.json() }
+  }
+  const insights = await get(`/api/projects/${a}/insights`)
+  assert.equal(insights.status, 200)
+  assert.equal(insights.body.migrations[0].name, 'init')
+  assert.deepEqual((await get(`/api/projects/${b}/insights`)).body.migrations, null)
+  const stats = await get(`/api/projects/${a}/stats?hours=24`)
+  assert.deepEqual(
+    stats.body.map((row) => row.sample.connections),
+    [30, 20, 10],
+    'oldest first, window applied'
+  )
+  assert.equal((await get(`/api/projects/${a}/stats?hours=999`)).status, 400)
+  const snapshots = await get(`/api/projects/${a}/schema-snapshots`)
+  assert.deepEqual(
+    snapshots.body.map((row) => row.id),
+    [newA, oldA],
+    'newest first'
+  )
+  assert(!('content' in snapshots.body[0]), 'list never ships schema text')
+  const overTime = await get(`/api/schema-diff?from=${oldA}&to=${newA}`)
+  assert.equal(overTime.status, 200)
+  assert.equal(overTime.body.added, 2)
+  assert.equal(overTime.body.removed, 1)
+  const crossProject = await get(`/api/schema-diff?from=${onlyB}&to=${newA}`)
+  assert.equal(crossProject.body.from.projectId, b)
+  assert.equal((await get(`/api/schema-diff?from=nope&to=${newA}`)).status, 400)
+  assert.equal((await get(`/api/schema-diff?from=${randomUUID()}&to=${newA}`)).status, 404)
+  // A member of one project cannot read another project's schema through a diff.
+  await pool.query(
+    "INSERT INTO control.project_members(project_id,subject,role) VALUES($1,'insights-scoped','viewer')",
+    [a]
+  )
+  await assert.rejects(schemaDiffFor('insights-scoped', onlyB, newA), { status: 403 })
+  await schemaDiffFor('insights-scoped', oldA, newA)
+  await assert.rejects(
+    import('../src/service.mjs').then((m) => m.projectInsights(pool, 'insights-scoped', b)),
+    { status: 403 }
+  )
+})
+async function schemaDiffFor(actor, from, to) {
+  const { schemaDiff } = await import('../src/service.mjs')
+  return schemaDiff(pool, actor, from, to)
+}
+test('backup schedules are per project and validated', async () => {
+  const { updateBackupSettings } = await import('../src/service.mjs')
+  const roomy = { ...config, capacityMb: 1048576, capacityCpus: 1024 }
+  const id = (await createProject(pool, roomy, 'owner', input, 'backup-schedule')).project_id
+  const row = (
+    await pool.query(
+      'SELECT backup_interval_hours, backup_retention FROM control.projects WHERE id=$1',
+      [id]
+    )
+  ).rows[0]
+  assert.deepEqual(
+    [row.backup_interval_hours, row.backup_retention],
+    [24, 7],
+    'daily, keep 7 by default'
+  )
+  assert.deepEqual(
+    await updateBackupSettings(pool, 'owner', id, { intervalHours: 6, retention: 3 }),
+    { intervalHours: 6, retention: 3 }
+  )
+  for (const bad of [
+    { intervalHours: -1, retention: 3 },
+    { intervalHours: 6, retention: 0 },
+    { intervalHours: 1.5, retention: 3 },
+    null,
+  ])
+    await assert.rejects(updateBackupSettings(pool, 'owner', id, bad), { status: 400 })
+  await pool.query(
+    "INSERT INTO control.project_members(project_id,subject,role) VALUES($1,'backup-viewer','viewer')",
+    [id]
+  )
+  await assert.rejects(
+    updateBackupSettings(pool, 'backup-viewer', id, { intervalHours: 0, retention: 1 }),
+    { status: 403 }
+  )
+  const response = await fetch(`${base}/api/projects/${id}`, {
+    headers: { Cookie: `__Host-platform=${ownerCookie}` },
+  })
+  const shown = await response.json()
+  assert.deepEqual([shown.backupIntervalHours, shown.backupRetention], [6, 3])
+})
+test('the scheduler queues backups by each project interval and skips disabled ones', async () => {
+  const roomy = { ...config, capacityMb: 1048576, capacityCpus: 1024 }
+  await pool.query("UPDATE control.projects SET status='deleted'")
+  const due = (await createProject(pool, roomy, 'owner', input, 'sched-due-1')).project_id
+  const off = (await createProject(pool, roomy, 'owner', input, 'sched-off-1')).project_id
+  const recent = (await createProject(pool, roomy, 'owner', input, 'sched-recent')).project_id
+  await pool.query("UPDATE control.projects SET status='ready' WHERE id = ANY($1)", [
+    [due, off, recent],
+  ])
+  await pool.query('UPDATE control.projects SET backup_interval_hours=0 WHERE id=$1', [off])
+  await pool.query(
+    "INSERT INTO control.backups(id,project_id,snapshot,source_path,release,created_at) VALUES($1,$2,'s','/x','test', now() - interval '1 hour')",
+    [randomUUID(), recent]
+  )
+  const saved = { ...process.env }
+  process.env.RESTIC_REPOSITORY = '/tmp/repository'
+  process.env.RESTIC_PASSWORD_FILE = '/tmp/password'
+  try {
+    await scheduleBackups(pool)
+    await scheduleBackups(pool) // idempotent within an interval
+  } finally {
+    process.env = saved
+  }
+  const queued = (
+    await pool.query(
+      "SELECT project_id, actor FROM control.operations WHERE kind='backup' AND project_id = ANY($1)",
+      [[due, off, recent]]
+    )
+  ).rows
+  assert.deepEqual(
+    queued.map((row) => row.project_id),
+    [due]
+  )
+  assert.equal(queued[0].actor, '@scheduler')
+})
+test('retention keeps the newest backups and forgets the rest', async () => {
+  const roomy = { ...config, capacityMb: 1048576, capacityCpus: 1024 }
+  const id = (await createProject(pool, roomy, 'owner', input, 'retention-test')).project_id
+  for (let i = 0; i < 5; i++)
+    await pool.query(
+      "INSERT INTO control.backups(id,project_id,snapshot,source_path,release,created_at) VALUES($1,$2,$3,'/x','test', now() - ($4 * interval '1 hour'))",
+      [randomUUID(), id, `snap-${i}`, i]
+    )
+  const infrastructure = new Infrastructure(config, pool)
+  let forgotten = []
+  await infrastructure.applyRetention({ id, backup_retention: 2 }, async (snapshots) => {
+    forgotten = snapshots
+  })
+  assert.deepEqual(forgotten.sort(), ['snap-2', 'snap-3', 'snap-4'])
+  const left = (
+    await pool.query(
+      'SELECT snapshot FROM control.backups WHERE project_id=$1 ORDER BY created_at DESC',
+      [id]
+    )
+  ).rows
+  assert.deepEqual(
+    left.map((row) => row.snapshot),
+    ['snap-0', 'snap-1']
+  )
+})
+test('a failed inspection is recorded without failing the operation or the project', async () => {
+  const roomy = { ...config, capacityMb: 1048576, capacityCpus: 1024 }
+  const created = await createProject(pool, roomy, 'owner', input, 'inspect-fails')
+  await pool.query("UPDATE control.operations SET state='succeeded' WHERE id=$1", [created.id])
+  await pool.query("UPDATE control.projects SET status='ready' WHERE id=$1", [created.project_id])
+  const op = await requestOperation(
+    pool,
+    roomy,
+    'owner',
+    created.project_id,
+    'inspect',
+    {},
+    'inspect-op-key'
+  )
+  const fake = {
+    config: {},
+    async inspect() {
+      throw Object.assign(new Error('COMMAND_FAILED'), { step: 'docker compose', stderr: 'boom' })
+    },
+  }
+  for (let i = 0; i < 10; i++) {
+    const state = (await pool.query('SELECT state FROM control.operations WHERE id=$1', [op.id]))
+      .rows[0].state
+    if (state === 'succeeded') break
+    await runOne(pool, roomy, fake)
+  }
+  assert.equal(
+    (await pool.query('SELECT state FROM control.operations WHERE id=$1', [op.id])).rows[0].state,
+    'succeeded'
+  )
+  assert.equal(
+    (await pool.query('SELECT status FROM control.projects WHERE id=$1', [created.project_id]))
+      .rows[0].status,
+    'ready'
+  )
+  assert.equal(
+    (
+      await pool.query('SELECT error_code FROM control.project_insights WHERE project_id=$1', [
+        created.project_id,
+      ])
+    ).rows[0].error_code,
+    'INSPECTION_FAILED'
+  )
+})
+test(
+  'runtime roles: the worker writes insights and prunes backups; the API only reads them',
+  { skip: process.env.CONTROL_TEST_RUNTIME_ROLES !== 'true' },
+  async () => {
+    const roomy = { ...config, capacityMb: 1048576, capacityCpus: 1024 }
+    const id = (await createProject(pool, roomy, 'owner', input, 'grants-insights')).project_id
+    const connect = (role, password) => {
+      const connection = new URL(url)
+      connection.username = role
+      connection.password = password
+      return database(connection.href)
+    }
+    const worker = connect('control_worker', 'integration-worker')
+    const api = connect('control_api', 'integration-api')
+    try {
+      await worker.query(
+        "INSERT INTO control.project_insights(project_id,migrations,collected_at) VALUES($1,'[]',now()) ON CONFLICT (project_id) DO UPDATE SET collected_at=now()",
+        [id]
+      )
+      await worker.query("INSERT INTO control.project_stats(project_id,sample) VALUES($1,'{}')", [
+        id,
+      ])
+      await worker.query('DELETE FROM control.project_stats WHERE project_id=$1', [id])
+      await worker.query(
+        "INSERT INTO control.schema_snapshots(id,project_id,content,hash,size_bytes) VALUES($1,$2,'','h',0)",
+        [randomUUID(), id]
+      )
+      await worker.query(
+        "INSERT INTO control.backups(id,project_id,snapshot,source_path,release,trigger) VALUES($1,$2,'s','/x','t','scheduled')",
+        [randomUUID(), id]
+      )
+      await worker.query('DELETE FROM control.backups WHERE project_id=$1', [id])
+      await api.query('SELECT * FROM control.project_insights WHERE project_id=$1', [id])
+      await api.query('SELECT * FROM control.schema_snapshots WHERE project_id=$1', [id])
+      await assert.rejects(
+        api.query("INSERT INTO control.project_stats(project_id,sample) VALUES($1,'{}')", [id]),
+        { code: '42501' }
+      )
+      await assert.rejects(api.query('DELETE FROM control.schema_snapshots'), { code: '42501' })
+      await assert.rejects(api.query('DELETE FROM control.backups'), { code: '42501' })
+    } finally {
+      await worker.end()
+      await api.end()
+    }
+  }
+)

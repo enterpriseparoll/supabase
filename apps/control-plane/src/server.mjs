@@ -23,7 +23,12 @@ import {
   projectAccess,
   projectSecrets,
   publicProject,
+  projectInsights,
+  projectStats,
   requestOperation,
+  schemaDiff,
+  schemaSnapshots,
+  updateBackupSettings,
 } from './service.mjs'
 
 async function body(request) {
@@ -396,7 +401,7 @@ export function managementServer(pool, config, oidc) {
           return send(response, 200, { ok: true })
         }
         const match = path.match(
-          /^\/api\/projects\/([^/]+)(?:\/(secrets|operations|backups|domains|studio-ticket|members))?$/
+          /^\/api\/projects\/([^/]+)(?:\/(secrets|operations|backups|domains|studio-ticket|members|insights|stats|schema-snapshots|backup-settings))?$/
         )
         if (match) {
           const id = projectId(match[1]),
@@ -412,6 +417,22 @@ export function managementServer(pool, config, oidc) {
               )
             )
           }
+          if (resource === 'insights' && request.method === 'GET')
+            return send(response, 200, await projectInsights(pool, subject, id))
+          if (resource === 'stats' && request.method === 'GET')
+            return send(
+              response,
+              200,
+              await projectStats(pool, subject, id, Number(url.searchParams.get('hours') ?? 24))
+            )
+          if (resource === 'schema-snapshots' && request.method === 'GET')
+            return send(response, 200, await schemaSnapshots(pool, subject, id))
+          if (resource === 'backup-settings' && request.method === 'POST')
+            return send(
+              response,
+              200,
+              await updateBackupSettings(pool, subject, id, await body(request))
+            )
           if (resource === 'secrets' && request.method === 'POST')
             return send(response, 200, await projectSecrets(pool, config, subject, id))
           if (resource === 'operations' && request.method === 'POST') {
@@ -436,7 +457,7 @@ export function managementServer(pool, config, oidc) {
               operations:
                 'SELECT id,kind,state,attempts,error_code,created_at,finished_at FROM control.operations WHERE project_id=$1 ORDER BY created_at DESC LIMIT 100',
               backups:
-                'SELECT id,snapshot,release,created_at FROM control.backups WHERE project_id=$1 ORDER BY created_at DESC LIMIT 100',
+                'SELECT id,snapshot,release,created_at,size_bytes,trigger FROM control.backups WHERE project_id=$1 ORDER BY created_at DESC LIMIT 100',
               domains:
                 'SELECT domain,verification_token,verified_at FROM control.domains WHERE project_id=$1 ORDER BY domain',
             }
@@ -513,6 +534,17 @@ export function managementServer(pool, config, oidc) {
             return send(response, 200, { ok: true })
           }
         }
+        if (path === '/api/schema-diff' && request.method === 'GET')
+          return send(
+            response,
+            200,
+            await schemaDiff(
+              pool,
+              subject,
+              url.searchParams.get('from'),
+              url.searchParams.get('to')
+            )
+          )
         if (path === '/api/audit' && request.method === 'GET') {
           authorize(await roleFor(pool, subject), 'members')
           return send(

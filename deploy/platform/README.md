@@ -31,6 +31,26 @@ Settings (set in the shell or a `.env` file next to `compose.local.yml`):
   and project data live inside the Docker engine's filesystem (the Docker Desktop
   VM), not in this repository.
 
+### Backups, migrations, schema history, and performance
+
+Each project drawer has **Backups**, **Migrations**, **Schema**, and **Performance**
+tabs. The worker collects migration history, schema snapshots, and performance
+statistics from each running project every `INSIGHTS_INTERVAL_MINUTES` (default 5);
+the API only serves what was collected.
+
+Backups run online (pg_dump plus Storage files) on each project's own schedule
+(daily by default, keeping 7). Local mode stores them, encrypted and deduplicated,
+in a restic repository at `/srv/supabase-platform/backups/restic` inside the Docker
+VM. That copy is lost with the VM, so set `RESTIC_REPOSITORY` to an S3-compatible
+bucket (for example `s3:https://s3.example.com/bucket/platform`, with
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) to keep copies off this machine. The
+repository password is `secrets/restic_password`; without it backups cannot be
+read.
+
+Restoring takes a safety backup, loads the chosen backup into a new database, and
+swaps it in only after it loads completely. The previous database is kept as
+`postgres_before_restore` until the next restore.
+
 ### Switching projects inside Studio
 
 Each project runs its own Studio. To get a cloud-style project switcher in the
