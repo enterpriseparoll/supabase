@@ -171,3 +171,15 @@ export function routeConfiguration(project, domains, config) {
     },
   }
 }
+
+// Runs inside the project's Studio container after start-up, through the public
+// gateway. The gateway accepts the anon key on Auth routes but only the
+// service-role key on the REST root. Failures print the path and status.
+export const readinessProbe = [
+  'const service=process.env.SUPABASE_SERVICE_KEY;',
+  "const targets=[['/auth/v1/health',{apikey:process.env.SUPABASE_ANON_KEY}],",
+  "['/rest/v1/',{apikey:service,Authorization:'Bearer '+service}]];",
+  'for(const [path,headers] of targets){',
+  "const response=await fetch('http://api-gw:8000'+path,{headers,signal:AbortSignal.timeout(10000)});",
+  "if(!response.ok){console.error('probe '+path+' returned '+response.status);process.exit(1)}}",
+].join('')

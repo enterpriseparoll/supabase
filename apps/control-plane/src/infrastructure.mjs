@@ -20,6 +20,7 @@ import {
   projectEnvironment,
   projectName,
   publicGateway,
+  readinessProbe,
   renderCompose,
   renderEnv,
   routeConfiguration,
@@ -225,7 +226,6 @@ export class Infrastructure {
         ...subnets,
       ])
     await this.compose(project, ['up', '-d', '--wait', '--wait-timeout', '300'])
-    const probe = `const targets=[['/auth/v1/health',{}],['/rest/v1/',{apikey:process.env.SUPABASE_ANON_KEY,Authorization:'Bearer '+process.env.SUPABASE_ANON_KEY}]];for(const [path,headers] of targets){const response=await fetch('http://api-gw:8000'+path,{headers,signal:AbortSignal.timeout(10000)});if(!response.ok)process.exit(1)}`
     await this.compose(project, [
       'exec',
       '-T',
@@ -233,7 +233,7 @@ export class Infrastructure {
       'node',
       '--input-type=module',
       '-e',
-      probe,
+      readinessProbe,
     ])
     await this.attachIngress(project)
     await this.route(project)

@@ -19,6 +19,7 @@ import { configuration } from '../src/config.mjs'
 import {
   projectEnvironment,
   publicGateway,
+  readinessProbe,
   renderCompose,
   renderEnv,
   routeConfiguration,
@@ -304,4 +305,21 @@ test('local mode publishes each project pooler on its own loopback ports', async
   assert.equal(localEnv.POOLER_TENANT_ID, id)
   const serverEnv = projectEnvironment(withPort, {}, { baseDomain: 'platform.example.com' })
   assert.equal(serverEnv.POOLER_PUBLIC_PORT, '')
+})
+test('readiness probe uses the keys the public gateway requires', async () => {
+  const source = await readFile(new URL('volumes/api/envoy/lds.template.yaml', root), 'utf8')
+  const routes =
+    parse(source).resources[0].filter_chains[0].filters[0].typed_config.route_config
+      .virtual_hosts[0].routes
+  const restRoot = routes.find((row) => row.match?.path === '/rest/v1/')
+  const principals = JSON.stringify(
+    restRoot.typed_per_filter_config['envoy.filters.http.rbac'].rbac.rules.policies
+  )
+  assert(!principals.includes('${ANON_KEY}'), 'REST root accepts only service-role keys')
+  assert(principals.includes('${SERVICE_ROLE_KEY}'))
+  assert.match(readinessProbe, /\/rest\/v1\/',\{apikey:service/)
+  assert.match(readinessProbe, /\/auth\/v1\/health',\{apikey:process\.env\.SUPABASE_ANON_KEY/)
+  assert.match(readinessProbe, /console\.error/)
+  // The probe must be valid JavaScript.
+  new Function(`return (async () => { ${readinessProbe.replaceAll('process.exit', 'void')} })`)
 })
