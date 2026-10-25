@@ -238,3 +238,34 @@ test('local setup writes routes Traefik will load and keeps secrets on re-run', 
   assert.equal(routes.http.routers.management.rule, 'Host(`manage.localhost`)')
   assert.deepEqual(routes.http.routers.management.entryPoints, ['web'])
 })
+test('Studio origin forwards only platform API paths to the control API', () => {
+  for (const config of [
+    { baseDomain: 'platform.example.com' },
+    { local: true, publicPort: 8090, baseDomain: 'localhost' },
+  ]) {
+    const route = routeConfiguration(project, [], config)
+    const platform = route.http.routers[`${id}-platform`]
+    assert.equal(
+      platform.rule,
+      `Host(\`${id}.studio.${config.baseDomain}\`) && PathPrefix(\`/_platform/api/\`)`
+    )
+    assert.equal(platform.service, 'management@file')
+    assert(platform.priority > 0)
+    assert.deepEqual(platform.entryPoints, route.http.routers[`${id}-studio`].entryPoints)
+  }
+})
+test('custom Studio image setting is validated', async () => {
+  const base = {
+    MASTER_KEY: 'ab'.repeat(32),
+    DATABASE_URL: 'postgresql://localhost/control_test',
+    PLATFORM_MODE: 'local',
+    LOCAL_ADMIN_TOKEN: 'tok',
+  }
+  assert.equal((await configuration(base)).studioImage, undefined)
+  const image = 'ghcr.io/enterpriseparoll/supabase-studio-platform:latest'
+  assert.equal((await configuration({ ...base, PLATFORM_STUDIO_IMAGE: image })).studioImage, image)
+  await assert.rejects(
+    configuration({ ...base, PLATFORM_STUDIO_IMAGE: 'bad image; rm -rf /' }),
+    /PLATFORM_STUDIO_IMAGE/
+  )
+})

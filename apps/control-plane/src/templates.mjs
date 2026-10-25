@@ -116,6 +116,15 @@ export function routeConfiguration(project, domains, config) {
       service: `${id}-studio`,
       middlewares: ['studio-auth@file', 'studio-headers@file'],
     },
+    // Platform endpoints served on the Studio origin (the project switcher's list).
+    // The control API authenticates these with the Studio session cookie itself.
+    [`${id}-platform`]: {
+      rule: `Host(\`${id}.studio.${config.baseDomain}\`) && PathPrefix(\`/_platform/api/\`)`,
+      priority: 1000,
+      ...entry,
+      service: 'management@file',
+      middlewares: ['studio-headers@file'],
+    },
   }
   return {
     http: {

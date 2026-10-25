@@ -30,6 +30,8 @@ x-runtime: &runtime
     PLATFORM_ROUTE_ROOT: ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/routes
     HOST_CAPACITY_MB: ${HOST_CAPACITY_MB:-8192}
     HOST_CAPACITY_CPUS: ${HOST_CAPACITY_CPUS:-4}
+    # Optional Studio build with the cross-project switcher (see README).
+    PLATFORM_STUDIO_IMAGE: ${PLATFORM_STUDIO_IMAGE:-}
   volumes:
     - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets:/run/secrets:ro
 

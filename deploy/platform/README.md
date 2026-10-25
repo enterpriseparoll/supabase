@@ -31,6 +31,20 @@ Settings (set in the shell or a `.env` file next to `compose.local.yml`):
   and project data live inside the Docker engine's filesystem (the Docker Desktop
   VM), not in this repository.
 
+### Switching projects inside Studio
+
+Each project runs its own Studio. To get a cloud-style project switcher in the
+Studio header (other projects, **All projects**, **New project**), run projects
+with the platform Studio image built from this repository. The
+`Platform Studio image` workflow publishes it to
+`ghcr.io/enterpriseparoll/supabase-studio-platform`; alternatively build it
+locally from the repository root with
+`docker build . -f apps/studio/Dockerfile --target production -t supabase-studio-platform:local`.
+
+Set `PLATFORM_STUDIO_IMAGE` to that image before `up`, then **Restart** existing
+projects from the dashboard so they pick it up. Without it, projects use the
+stock Studio image and you switch projects from the dashboard instead.
+
 Local mode refuses `PLATFORM_FIREWALL=skip` without `PLATFORM_MODE=local`, so the
 server deployment below cannot be switched into it by a stray variable. To remove
 everything, delete the projects in the dashboard, then run

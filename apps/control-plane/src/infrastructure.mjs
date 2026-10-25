@@ -65,12 +65,15 @@ export class Infrastructure {
   async prepare(project) {
     const directory = await this.safeDirectory(project.id)
     const marker = `${directory}/.prepared`
-    try {
-      await stat(marker)
-      return
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error
-    }
+    // Local mode re-renders on every start so template and Studio image changes reach
+    // existing projects on Restart. Data directories and secrets are never replaced.
+    if (!this.config.local)
+      try {
+        await stat(marker)
+        return
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+      }
     // No upstream scripts execute here. Only approved, immutable template assets are copied.
     await cp(`${this.config.templateRoot}/volumes`, `${directory}/volumes`, {
       recursive: true,
@@ -97,6 +100,8 @@ export class Infrastructure {
         project
       )
     )
+    // A platform Studio build adds the cross-project switcher; stock Studio still works.
+    if (this.config.studioImage) compose.services.studio.image = this.config.studioImage
     for (const service of Object.values(compose.services)) {
       if (service.image.includes('@sha256:')) continue
       let digests
@@ -122,6 +127,9 @@ export class Infrastructure {
           ])
         )
       }
+      // Images built on this machine have no registry digest. Local mode keeps the tag;
+      // servers still require a pinned digest.
+      if (!(digests?.length > 0) && this.config.local) continue
       invariant(digests?.length > 0, 409, 'IMAGE_DIGEST_UNAVAILABLE')
       service.image = digests[0]
     }

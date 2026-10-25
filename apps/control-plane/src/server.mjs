@@ -104,6 +104,17 @@ export function managementServer(pool, config, oidc) {
     ['/dashboard.mjs', ['dashboard.mjs', 'text/javascript']],
     ['/styles.css', ['styles.css', 'text/css']],
   ])
+  const studioUrl = (id) => publicUrl(config, `${id}.studio.${config.baseDomain}`)
+  // Short-lived, single-use link that signs the subject in to one project's Studio.
+  const studioHandoff = async (subject, id) => {
+    await projectAccess(pool, subject, id, 'studio')
+    const ticket = token()
+    await pool.query(
+      "INSERT INTO control.studio_tickets(token_hash,subject,project_id,expires_at) VALUES($1,$2,$3,now()+interval '30 seconds')",
+      [hash(ticket), subject, id]
+    )
+    return `${studioUrl(id)}/_platform/session?ticket=${ticket}`
+  }
   const cookie = (name) => cookieName(config, name)
   const setCookie = (name, value, age) => sessionCookie(cookie(name), value, age, !config.local)
   return createServer(
@@ -181,6 +192,42 @@ export function managementServer(pool, config, oidc) {
           const method = request.headers['x-forwarded-method']
           if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) verifyOrigin(request, studioOrigin)
           return send(response, 204)
+        }
+        // Traefik routes <id>.studio.<domain>/_platform/api/* here with the Host intact,
+        // so Studio's project switcher can list projects on its own origin using the
+        // Studio session cookie (dashboard cookies are cross-site on *.localhost).
+        if (path === '/_platform/api/projects' && request.method === 'GET') {
+          const host = request.headers.host
+          const hostname =
+            typeof host === 'string' && config.local
+              ? host.replace(`:${config.publicPort}`, '')
+              : host
+          const match =
+            typeof hostname === 'string' && hostname.match(/^([a-z0-9]+)\.studio\.(.+)$/)
+          invariant(match && match[2] === config.baseDomain, 403, 'Invalid Studio host')
+          const id = projectId(match[1])
+          const subject = await sessionSubject(
+            pool,
+            cookieValue(request.headers.cookie, cookie('studio')),
+            id
+          )
+          invariant(subject, 401, 'Open Studio from the project dashboard')
+          await projectAccess(pool, subject, id, 'studio')
+          const { projects } = await listProjects(pool, config, subject, '', 100)
+          return send(response, 200, {
+            projects: projects.map(({ id, name, status }) => ({ id, name, status })),
+          })
+        }
+        // Top-level navigation from a Studio switcher: sign in to another project's Studio.
+        const openMatch = path.match(/^\/open\/([^/]+)$/)
+        if (openMatch && request.method === 'GET') {
+          const id = projectId(openMatch[1])
+          const subject = await sessionSubject(
+            pool,
+            cookieValue(request.headers.cookie, cookie('platform'))
+          )
+          if (!subject) return send(response, 303, undefined, { Location: '/auth/login' })
+          return send(response, 303, undefined, { Location: await studioHandoff(subject, id) })
         }
         if (request.method === 'GET' && assets.has(path)) {
           const [file, type] = assets.get(path)
@@ -417,17 +464,8 @@ export function managementServer(pool, config, oidc) {
               )
             )
           }
-          if (resource === 'studio-ticket' && request.method === 'POST') {
-            await projectAccess(pool, subject, id, 'studio')
-            const ticket = token()
-            await pool.query(
-              "INSERT INTO control.studio_tickets(token_hash,subject,project_id,expires_at) VALUES($1,$2,$3,now()+interval '30 seconds')",
-              [hash(ticket), subject, id]
-            )
-            return send(response, 200, {
-              url: `${publicUrl(config, `${id}.studio.${config.baseDomain}`)}/_platform/session?ticket=${ticket}`,
-            })
-          }
+          if (resource === 'studio-ticket' && request.method === 'POST')
+            return send(response, 200, { url: await studioHandoff(subject, id) })
           if (resource === 'members' && request.method === 'GET') {
             await projectAccess(pool, subject, id, 'members')
             return send(

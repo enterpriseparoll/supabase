@@ -36,7 +36,14 @@ export async function configuration(env = process.env) {
     500,
     'PLATFORM_FIREWALL=skip is only allowed with PLATFORM_MODE=local'
   )
+  const studioImage = env.PLATFORM_STUDIO_IMAGE || undefined
+  invariant(
+    studioImage === undefined || /^[a-z0-9][a-z0-9._/:@-]{0,254}$/.test(studioImage),
+    500,
+    'Invalid PLATFORM_STUDIO_IMAGE'
+  )
   return {
+    studioImage,
     databaseUrl: await secret('DATABASE_URL'),
     key,
     baseDomain,

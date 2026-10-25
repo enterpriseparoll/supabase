@@ -265,6 +265,18 @@ async function loadProjects(reset = false) {
 }
 for (const node of document.querySelectorAll('[data-close]'))
   node.addEventListener('click', () => node.closest('dialog').close())
+// Drawers close when the backdrop (outside the panel) is clicked, like Escape.
+for (const dialog of document.querySelectorAll('dialog'))
+  dialog.addEventListener('click', (event) => {
+    if (event.target !== dialog) return
+    const box = dialog.getBoundingClientRect()
+    const inside =
+      event.clientX >= box.left &&
+      event.clientX <= box.right &&
+      event.clientY >= box.top &&
+      event.clientY <= box.bottom
+    if (!inside) dialog.close()
+  })
 $('detail-dialog').addEventListener('close', () => {
   selected = null
   $('detail').replaceChildren()
@@ -345,6 +357,18 @@ try {
   $('members').hidden = me.role !== 'owner'
   $('audit').hidden = me.role !== 'owner'
   await loadProjects()
+  // Deep links from each project's Studio switcher: #new and #project/<id>.
+  const [, linked] = location.hash.match(/^#project\/(p[a-f0-9]{24})$/) ?? []
+  if (location.hash === '#new' && !$('new-project').hidden) $('create-dialog').showModal()
+  else if (linked) {
+    try {
+      const project = projects.get(linked) ?? (await api(`/api/projects/${linked}`))
+      await detail(project)
+    } catch (error) {
+      notice(error.message)
+    }
+  }
+  if (location.hash) history.replaceState(null, '', location.pathname)
   setInterval(async () => {
     if (document.hidden || $('detail-dialog').open) return
     try {

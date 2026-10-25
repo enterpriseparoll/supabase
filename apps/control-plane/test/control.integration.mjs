@@ -1,4 +1,5 @@
 import { test, before, after } from 'node:test'
+import { request as httpRequest } from 'node:http'
 import assert from 'node:assert/strict'
 import { database, migrate, transaction, sessionSubject } from '../src/database.mjs'
 import {
@@ -515,6 +516,50 @@ test('local mode signs in with the generated token over plain HTTP', async () =>
       })
     assert.equal((await check(handoff.host)).status, 204)
     assert.equal((await check(`${projectId}.studio.localhost:9999`)).status, 403)
+    // Studio's project switcher: list on the Studio origin with the Studio cookie.
+    // fetch() cannot override Host, which Traefik passes through from the Studio origin.
+    const list = (host, headers = {}) =>
+      new Promise((resolve, reject) => {
+        const request = httpRequest(
+          `${at}/_platform/api/projects`,
+          { headers: { ...headers, Host: host } },
+          (response) => {
+            let body = ''
+            response.on('data', (chunk) => (body += chunk))
+            response.on('end', () =>
+              resolve({ status: response.statusCode, json: async () => JSON.parse(body) })
+            )
+          }
+        )
+        request.on('error', reject)
+        request.end()
+      })
+    const listed2 = await list(handoff.host, { Cookie: studioCookie })
+    assert.equal(listed2.status, 200)
+    const { projects } = await listed2.json()
+    assert(projects.some((row) => row.id === projectId))
+    assert.deepEqual(Object.keys(projects[0]).sort(), ['id', 'name', 'status'])
+    assert.equal((await list(handoff.host)).status, 401)
+    assert.equal((await list(handoff.host, { Cookie: cookie })).status, 401)
+    assert.equal((await list('evil.example.com', { Cookie: studioCookie })).status, 403)
+    // Switching opens the other project's Studio through a single-use handoff.
+    const open = await fetch(`${at}/open/${projectId}`, {
+      redirect: 'manual',
+      headers: { Cookie: cookie },
+    })
+    assert.equal(open.status, 303)
+    assert.match(
+      open.headers.get('location'),
+      new RegExp(`^http://${projectId}\\.studio\\.localhost:8090/_platform/session\\?ticket=`)
+    )
+    const anonymous = await fetch(`${at}/open/${projectId}`, { redirect: 'manual' })
+    assert.equal(anonymous.status, 303)
+    assert.equal(anonymous.headers.get('location'), '/auth/login')
+    assert.equal(
+      (await fetch(`${at}/open/../etc`, { redirect: 'manual', headers: { Cookie: cookie } }))
+        .status,
+      404
+    )
   } finally {
     await new Promise((resolve) => local.close(resolve))
   }
