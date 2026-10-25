@@ -217,3 +217,24 @@ test('local mode serves projects over plain HTTP on localhost with non-Secure co
     projectInput({ name: 'App', siteUrl: 'http://example.com' }, { allowLocalhost: true })
   )
 })
+test('local setup writes routes Traefik will load and keeps secrets on re-run', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const { mkdtemp, readdir } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const dataRoot = await mkdtemp(`${tmpdir()}/local-init-`)
+  const run = () =>
+    execFileSync(process.execPath, [new URL('../src/local-init.mjs', import.meta.url).pathname], {
+      env: { ...process.env, PLATFORM_DATA_ROOT: dataRoot },
+    }).toString()
+  assert.match(run(), /Sign-in token: +\S{20,}/)
+  const password = await readFile(`${dataRoot}/secrets/db_api_password`, 'utf8')
+  run()
+  assert.equal(await readFile(`${dataRoot}/secrets/db_api_password`, 'utf8'), password)
+  const files = await readdir(`${dataRoot}/routes`)
+  assert(files.length > 0)
+  // Traefik's file provider silently skips any other extension.
+  for (const file of files) assert.match(file, /\.(ya?ml|toml)$/)
+  const routes = parse(await readFile(`${dataRoot}/routes/platform.yml`, 'utf8'))
+  assert.equal(routes.http.routers.management.rule, 'Host(`manage.localhost`)')
+  assert.deepEqual(routes.http.routers.management.entryPoints, ['web'])
+})

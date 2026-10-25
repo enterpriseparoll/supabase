@@ -1,7 +1,7 @@
 // One-time setup for PLATFORM_MODE=local on a developer machine (Docker Desktop).
 // Generates control-plane secrets and the local Traefik routes, then prints the
 // sign-in token. Safe to re-run: existing secrets are never replaced.
-import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, chmod, rm } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { resolve } from 'node:path'
 
@@ -82,7 +82,9 @@ const routes = {
     },
   },
 }
-await writeFile(`${root}/routes/platform.json`, JSON.stringify(routes, null, 2), { mode: 0o644 })
+// Traefik's file provider only loads .yml/.yaml/.toml files. JSON is valid YAML.
+await writeFile(`${root}/routes/platform.yml`, JSON.stringify(routes, null, 2), { mode: 0o644 })
+await rm(`${root}/routes/platform.json`, { force: true })
 
 const signIn = (await readFile(`${root}/secrets/local_admin_token`, 'utf8')).trim()
 console.log(

@@ -42,7 +42,8 @@ const routes = {
     },
   },
 }
-await writeFile(`${root}/routes/platform.json`, JSON.stringify(routes, null, 2), { flag: 'wx', mode: 0o600 })
+// Traefik's file provider only loads .yml/.yaml/.toml files. JSON is valid YAML.
+await writeFile(`${root}/routes/platform.yml`, JSON.stringify(routes, null, 2), { flag: 'wx', mode: 0o600 })
 const values = {
   PLATFORM_DOMAIN: base, PLATFORM_DATA_ROOT: root, OIDC_ISSUER: env.OIDC_ISSUER,
   OIDC_CLIENT_ID: env.OIDC_CLIENT_ID, OIDC_REQUIRED_ACR: env.OIDC_REQUIRED_ACR, ACME_EMAIL: env.ACME_EMAIL,
