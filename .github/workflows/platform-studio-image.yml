@@ -1,0 +1,50 @@
+name: Platform Studio image
+
+# Builds Studio with the self-hosted platform's cross-project switcher and
+# publishes it to GHCR for PLATFORM_STUDIO_IMAGE. Stock Studio still works
+# without it; this image only adds the switcher.
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, feat/self-hosted-control-plane]
+    paths:
+      - 'apps/studio/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/platform-studio-image.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-studio-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository == 'enterpriseparoll/supabase'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2.10.0
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@1104d471370f9806843c095c1db02b5a90c5f8b6 # v3.3.1
+        with:
+          context: .
+          file: apps/studio/Dockerfile
+          target: production
+          push: true
+          tags: |
+            ghcr.io/enterpriseparoll/supabase-studio-platform:latest
+            ghcr.io/enterpriseparoll/supabase-studio-platform:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
