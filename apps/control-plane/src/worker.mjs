@@ -224,8 +224,11 @@ export async function observe(pool, infrastructure) {
           'UPDATE control.projects SET metrics=$2,last_observed_at=now(),status=$3 WHERE id=$1',
           [project.id, metrics, metrics.healthy ? 'ready' : 'error']
         )
-        if (metrics.healthy) await infrastructure.route(project)
-        else await infrastructure.unroute(project)
+        if (metrics.healthy) {
+          // Recreating Traefik drops networks joined at runtime; rejoin before routing.
+          await infrastructure.attachIngress(project)
+          await infrastructure.route(project)
+        } else await infrastructure.unroute(project)
       } catch {
         await db.query(
           "UPDATE control.projects SET last_observed_at=now(),metrics=jsonb_build_object('error','OBSERVATION_FAILED') WHERE id=$1",
