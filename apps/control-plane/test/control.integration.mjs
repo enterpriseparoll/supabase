@@ -477,6 +477,8 @@ test('local mode signs in with the generated token over plain HTTP', async () =>
       role: 'owner',
       local: true,
       mcpUrl: 'http://127.0.0.1:8090/mcp',
+      capacityMb: localConfig.capacityMb,
+      capacityCpus: localConfig.capacityCpus,
     })
     const created = await fetch(`${at}/api/projects`, {
       method: 'POST',

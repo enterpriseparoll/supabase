@@ -1,17 +1,58 @@
 @import 'tailwindcss';
 @source './index.html';
 @source './dashboard.mjs';
-@theme {
-  --color-background: Canvas;
-  --color-foreground: CanvasText;
-  --color-muted: color-mix(in srgb, CanvasText 8%, Canvas);
-  --color-subtle: color-mix(in srgb, CanvasText 60%, Canvas);
-  --color-border: color-mix(in srgb, CanvasText 18%, Canvas);
-  --color-accent: LinkText;
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-foreground: var(--foreground);
+  --color-subtle: var(--subtle);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-ok: var(--ok);
 }
 @layer base {
   :root {
-    color-scheme: light dark;
+    color-scheme: light;
+    --background: #ffffff;
+    --surface: #f8f9fa;
+    --raised: #fcfcfc;
+    --foreground: #1c1c1c;
+    --subtle: #707070;
+    --muted: #f0f0f0;
+    --border: #e6e8eb;
+    --border-strong: #d0d2d6;
+    --brand: #3ecf8e;
+    --brand-strong: #34b27b;
+    --brand-foreground: #053322;
+    --danger: #e5484d;
+    --warning: #b35909;
+    --ok: #1a9e66;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --background: #1c1c1c;
+      --surface: #171717;
+      --raised: #232323;
+      --foreground: #ededed;
+      --subtle: #a0a0a0;
+      --muted: #2a2a2a;
+      --border: #2e2e2e;
+      --border-strong: #444444;
+      --brand: #3ecf8e;
+      --brand-strong: #62ddab;
+      --brand-foreground: #062418;
+      --danger: #f2555a;
+      --warning: #ffb224;
+      --ok: #3ecf8e;
+    }
   }
   button,
   a {
@@ -28,18 +69,27 @@
   }
   input,
   select {
-    background: var(--color-background);
+    background: var(--color-raised);
     border: 1px solid var(--color-border);
-    padding: 0.5rem 0.75rem;
+    color: var(--color-foreground);
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
     width: 100%;
   }
   input[type='checkbox'] {
     width: auto;
     padding: 0;
   }
+  input::placeholder {
+    color: var(--color-subtle);
+  }
   button {
     border: 1px solid var(--color-border);
-    padding: 0.5rem 0.8rem;
+    color: var(--color-foreground);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    padding: 0.375rem 0.75rem;
   }
   button:hover {
     background: var(--color-muted);
@@ -47,9 +97,10 @@
   button:focus-visible,
   a:focus-visible,
   input:focus-visible,
-  select:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 3px;
+  select:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
   }
   /* Every dialog is a right-hand drawer, like the Supabase dashboard's side panels. */
   dialog {
@@ -66,13 +117,13 @@
     max-height: 100dvh;
     overflow: auto;
     overscroll-behavior: contain;
-    box-shadow: -12px 0 32px color-mix(in srgb, CanvasText 15%, transparent);
+    box-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
   }
   dialog[open] {
     animation: drawer-in 200ms ease-out;
   }
   dialog::backdrop {
-    background: color-mix(in srgb, CanvasText 40%, transparent);
+    background: rgb(0 0 0 / 0.5);
   }
   dialog[open]::backdrop {
     animation: backdrop-in 200ms ease-out;
@@ -95,5 +146,173 @@
   }
   [hidden] {
     display: none !important;
+  }
+}
+@layer components {
+  .btn-primary {
+    align-items: center;
+    background: var(--color-brand);
+    border-color: transparent;
+    color: var(--color-brand-foreground);
+    display: inline-flex;
+    font-weight: 500;
+    gap: 0.375rem;
+  }
+  .btn-primary:hover {
+    background: var(--color-brand-strong);
+  }
+  .nav-icon {
+    align-items: center;
+    border: 0;
+    border-radius: 0.375rem;
+    color: var(--color-subtle);
+    display: grid;
+    height: 2.25rem;
+    justify-items: center;
+    padding: 0;
+    width: 2.25rem;
+  }
+  .nav-icon:hover {
+    background: var(--color-muted);
+    color: var(--color-foreground);
+  }
+  .nav-icon[aria-current='page'] {
+    background: var(--color-muted);
+    color: var(--color-brand);
+  }
+  .badge {
+    align-items: center;
+    background: var(--color-muted);
+    border-radius: 0.25rem;
+    color: var(--color-subtle);
+    display: inline-flex;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    padding: 0.125rem 0.375rem;
+    text-transform: uppercase;
+  }
+  .chip {
+    align-items: center;
+    background: var(--color-muted);
+    border-radius: 0.25rem;
+    color: var(--color-subtle);
+    display: inline-flex;
+    font-family: ui-monospace, monospace;
+    font-size: 0.625rem;
+    gap: 0.25rem;
+    letter-spacing: 0.04em;
+    padding: 0.1875rem 0.375rem;
+    text-transform: uppercase;
+  }
+  .card {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+    cursor: pointer;
+    padding: 1rem 1.25rem;
+    position: relative;
+  }
+  .card:hover {
+    background: var(--color-raised);
+    border-color: var(--color-border-strong);
+  }
+  .kebab {
+    align-items: center;
+    border: 0;
+    border-radius: 0.25rem;
+    color: var(--color-subtle);
+    display: grid;
+    height: 1.75rem;
+    justify-items: center;
+    padding: 0;
+    width: 1.75rem;
+  }
+  .kebab:hover {
+    background: var(--color-muted);
+    color: var(--color-foreground);
+  }
+  .menu {
+    background: var(--color-raised);
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+    min-width: 11rem;
+    padding: 0.25rem;
+    position: absolute;
+    right: 0.75rem;
+    top: 2.75rem;
+    z-index: 20;
+  }
+  .menu-item {
+    border: 0;
+    border-radius: 0.25rem;
+    display: block;
+    padding: 0.375rem 0.75rem;
+    text-align: left;
+    width: 100%;
+  }
+  .menu-item:hover {
+    background: var(--color-muted);
+  }
+  .menu-item[disabled] {
+    color: var(--color-subtle);
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .meter {
+    background: var(--color-muted);
+    border-radius: 9999px;
+    height: 0.25rem;
+    margin-top: 0.375rem;
+    overflow: hidden;
+  }
+  .meter-fill {
+    background: var(--color-brand);
+    height: 100%;
+  }
+  .row-card {
+    align-items: center;
+    cursor: pointer;
+    display: flex;
+    gap: 1rem;
+    padding: 0.875rem 1rem;
+    position: relative;
+  }
+  .row-card:hover {
+    background: var(--color-raised);
+  }
+  .view-toggle {
+    border: 1px solid var(--color-border);
+    border-radius: 0.375rem;
+    display: inline-flex;
+    overflow: hidden;
+  }
+  .view-toggle > button {
+    align-items: center;
+    border: 0;
+    border-radius: 0;
+    color: var(--color-subtle);
+    display: grid;
+    height: 2rem;
+    justify-items: center;
+    padding: 0;
+    width: 2.25rem;
+  }
+  .view-toggle > button[aria-pressed='true'] {
+    background: var(--color-muted);
+    color: var(--color-foreground);
+  }
+  #notice {
+    background: var(--color-raised);
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+    bottom: 1rem;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+    max-width: 22rem;
+    padding: 0.75rem 1rem;
+    position: fixed;
+    right: 1rem;
+    z-index: 50;
   }
 }

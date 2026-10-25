@@ -415,6 +415,8 @@ export function managementServer(pool, config, oidc) {
             mcpUrl: config.local
               ? `http://127.0.0.1:${config.publicPort}/mcp`
               : `${config.origin}/mcp`,
+            capacityMb: config.capacityMb,
+            capacityCpus: config.capacityCpus,
           })
         if (path === '/api/projects') {
           if (request.method === 'GET')

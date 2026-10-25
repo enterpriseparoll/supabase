@@ -22,8 +22,12 @@ async function api(path, options = {}) {
   }
   return value
 }
+let noticeTimer
 function notice(message) {
   $('notice').textContent = message
+  $('notice').hidden = !message
+  clearTimeout(noticeTimer)
+  if (message) noticeTimer = setTimeout(() => ($('notice').hidden = true), 8000)
   const dialog = [...document.querySelectorAll('dialog[open]')].at(-1)
   if (dialog) {
     let status = dialog.querySelector('[data-status]')
@@ -1550,20 +1554,228 @@ async function renderPerformance(project, root) {
     )
 }
 
-function renderProjects() {
-  $('projects').replaceChildren()
-  for (const project of projects.values()) {
-    const card = element('article', '', 'rounded-lg border border-border p-5')
-    const title = element('h2', project.name, 'text-lg font-semibold')
-    card.append(
-      title,
-      element('p', project.status, 'mt-2 text-sm text-subtle'),
-      element('p', project.id, 'mt-4 break-all font-mono text-xs text-subtle'),
-      element('p', `${project.memoryMb} MiB / ${project.cpus} CPU`, 'mb-5 mt-2 text-sm'),
-      button('Manage project', async () => detail(await api(`/api/projects/${project.id}`)))
-    )
-    $('projects').append(card)
+// ---- Project list: cloud-style cards, filtering, sorting, and layout ----
+const iconPaths = {
+  more: '<circle cx="12" cy="5.5" r="1.25"/><circle cx="12" cy="12" r="1.25"/><circle cx="12" cy="18.5" r="1.25"/>',
+  pause:
+    '<rect x="7" y="5" width="3.5" height="14" rx="1"/><rect x="13.5" y="5" width="3.5" height="14" rx="1"/>',
+  dot: '<circle cx="12" cy="12" r="5"/>',
+  clock:
+    '<circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+}
+function icon(name, classes = 'h-4 w-4') {
+  const template = document.createElement('template')
+  template.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" class="${classes}" aria-hidden="true">${iconPaths[name]}</svg>`
+  return template.content.firstElementChild
+}
+const closeMenus = () => {
+  for (const menu of document.querySelectorAll('.menu')) menu.remove()
+}
+const projectStatus = (project) => {
+  if (project.status === 'stopped')
+    return { key: 'paused', label: 'Project is paused', icon: 'pause', tone: 'text-subtle' }
+  if (project.status === 'ready')
+    return { key: 'running', label: 'Project is running', icon: 'dot', tone: 'text-ok' }
+  if (project.status === 'error')
+    return { key: 'error', label: 'Something went wrong', icon: 'dot', tone: 'text-danger' }
+  return {
+    key: 'provisioning',
+    label: 'Project is provisioning',
+    icon: 'clock',
+    tone: 'text-warning',
   }
+}
+const hostOf = (url) => {
+  try {
+    return new URL(url).host
+  } catch {
+    return url ?? ''
+  }
+}
+const view = {
+  q: '',
+  status: 'all',
+  sort: 'name',
+  layout: localStorage.getItem('control-plane.layout') === 'list' ? 'list' : 'grid',
+}
+function visibleProjects() {
+  let rows = [...projects.values()]
+  const q = view.q.trim().toLowerCase()
+  if (q)
+    rows = rows.filter(
+      (project) => project.name.toLowerCase().includes(q) || project.id.includes(q)
+    )
+  if (view.status !== 'all')
+    rows = rows.filter((project) => projectStatus(project).key === view.status)
+  if (view.sort === 'name') rows.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+  else
+    rows.sort(
+      (a, b) => (new Date(a.createdAt) - new Date(b.createdAt)) * (view.sort === 'oldest' ? 1 : -1)
+    )
+  return rows
+}
+// The "…" menu on each card mirrors the quick actions in the project drawer.
+function cardMenu(project, card) {
+  const canOperate = ['owner', 'operator'].includes(project.role)
+  const running = project.desiredState === 'running' && project.status === 'ready'
+  const items = []
+  if (canOperate && running)
+    items.push([
+      'Open Studio',
+      async () => {
+        const ticket = await api(`/api/projects/${project.id}/studio-ticket`, {
+          method: 'POST',
+          body: '{}',
+        })
+        location.assign(ticket.url)
+      },
+    ])
+  if (canOperate)
+    items.push([
+      running ? 'Pause project' : 'Resume project',
+      () => operation(project, running ? 'stop' : 'start'),
+    ])
+  items.push(['Manage project', async () => detail(await api(`/api/projects/${project.id}`))])
+  const kebab = element('button', '', 'kebab')
+  kebab.type = 'button'
+  kebab.append(icon('more'))
+  kebab.setAttribute('aria-label', `Actions for ${project.name}`)
+  kebab.setAttribute('aria-haspopup', 'menu')
+  kebab.addEventListener('click', (event) => {
+    event.stopPropagation()
+    if (card.querySelector('.menu')) return closeMenus()
+    closeMenus()
+    const menu = element('div', '', 'menu')
+    menu.setAttribute('role', 'menu')
+    menu.addEventListener('click', (click) => click.stopPropagation())
+    for (const [label, action] of items) {
+      const item = button(label, async () => {
+        menu.remove()
+        await action()
+      })
+      item.className = 'menu-item'
+      item.setAttribute('role', 'menuitem')
+      menu.append(item)
+    }
+    card.append(menu)
+  })
+  return kebab
+}
+function openProject(card, project) {
+  const open = () =>
+    api(`/api/projects/${project.id}`)
+      .then(detail)
+      .catch((error) => notice(error.message))
+  card.addEventListener('click', open)
+  card.addEventListener('keydown', (event) => {
+    if (event.target !== card || !['Enter', ' '].includes(event.key)) return
+    event.preventDefault()
+    open()
+  })
+}
+function projectCard(project) {
+  const state = projectStatus(project)
+  const card = element('article', '', 'card')
+  card.tabIndex = 0
+  const head = element('div', '', 'flex items-start justify-between gap-3')
+  head.append(element('h2', project.name, 'truncate font-medium'), cardMenu(project, card))
+  card.append(head)
+  card.append(element('p', hostOf(project.apiUrl), 'mt-0.5 truncate text-xs text-subtle'))
+  const chips = element('div', '', 'mt-3 flex flex-wrap gap-1.5')
+  chips.append(element('span', `${project.memoryMb} MiB / ${project.cpus} CPU`, 'chip'))
+  if (project.release) chips.append(element('span', project.release, 'chip'))
+  card.append(chips)
+  const status = element('p', '', `mt-4 flex items-center gap-2 text-xs ${state.tone}`)
+  status.append(icon(state.icon, 'h-3.5 w-3.5'), element('span', state.label))
+  card.append(status)
+  openProject(card, project)
+  return card
+}
+function projectRow(project) {
+  const state = projectStatus(project)
+  const row = element('article', '', 'row-card')
+  row.tabIndex = 0
+  row.append(icon('dot', `h-2.5 w-2.5 shrink-0 ${state.tone}`))
+  const main = element('div', '', 'min-w-0')
+  main.append(
+    element('h2', project.name, 'truncate text-sm font-medium'),
+    element('p', hostOf(project.apiUrl), 'truncate text-xs text-subtle')
+  )
+  row.append(main)
+  const right = element('div', '', 'ml-auto flex items-center gap-6')
+  right.append(
+    element('span', `${project.memoryMb} MiB / ${project.cpus} CPU`, 'chip hidden md:inline-flex'),
+    element(
+      'span',
+      project.createdAt ? new Date(project.createdAt).toLocaleDateString() : '',
+      'hidden text-xs text-subtle lg:inline'
+    ),
+    element('span', state.label, `hidden w-36 text-xs sm:inline ${state.tone}`),
+    cardMenu(project, row)
+  )
+  row.append(right)
+  openProject(row, project)
+  return row
+}
+function meter(label, value, ratio) {
+  const row = element('div')
+  const top = element('div', '', 'flex items-baseline justify-between gap-2 text-xs')
+  top.append(element('span', label, 'text-subtle'), element('span', value))
+  row.append(top)
+  if (ratio !== null) {
+    const bar = element('div', '', 'meter')
+    const fill = element('div', '', 'meter-fill')
+    fill.style.width = `${Math.min(100, Math.max(0, ratio * 100))}%`
+    bar.append(fill)
+    row.append(bar)
+  }
+  return row
+}
+// The capacity panel sums what is reserved, like the usage card on Supabase Cloud.
+function renderUsage() {
+  if (!me) return
+  const rows = [...projects.values()]
+  const running = rows.filter((project) => projectStatus(project).key === 'running').length
+  const meters = []
+  if (me.capacityMb) {
+    const memory = rows.reduce((sum, project) => sum + (project.memoryMb ?? 0), 0)
+    const cpus = rows.reduce((sum, project) => sum + (project.cpus ?? 0), 0)
+    meters.push(
+      meter(
+        'Memory reserved',
+        `${memory.toLocaleString()} / ${me.capacityMb.toLocaleString()} MiB`,
+        memory / me.capacityMb
+      ),
+      meter('CPU reserved', `${cpus} / ${me.capacityCpus} CPU`, cpus / me.capacityCpus)
+    )
+  }
+  meters.push(
+    meter(
+      'Projects running',
+      `${running} / ${rows.length}`,
+      rows.length ? running / rows.length : 0
+    ),
+    meter('Projects', String(rows.length), null)
+  )
+  $('usage').replaceChildren(...meters)
+}
+function renderProjects() {
+  const rows = visibleProjects()
+  const grid = $('projects')
+  grid.className =
+    view.layout === 'grid'
+      ? 'mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3'
+      : 'mt-5 divide-y divide-border overflow-hidden rounded-lg border border-border'
+  grid.replaceChildren()
+  for (const project of rows)
+    grid.append(view.layout === 'grid' ? projectCard(project) : projectRow(project))
+  const empty = $('projects-empty')
+  empty.hidden = rows.length > 0
+  if (!rows.length)
+    empty.textContent = projects.size
+      ? 'No projects match the current search or filters.'
+      : 'No projects yet.'
+  renderUsage()
 }
 async function loadProjects(reset = false) {
   if (reset) {
@@ -1596,6 +1808,33 @@ $('detail-dialog').addEventListener('close', () => {
 })
 $('new-project').addEventListener('click', () => $('create-dialog').showModal())
 $('more').addEventListener('click', () => loadProjects().catch((error) => notice(error.message)))
+$('project-search').addEventListener('input', (event) => {
+  view.q = event.target.value
+  renderProjects()
+})
+$('status-filter').addEventListener('change', (event) => {
+  view.status = event.target.value
+  renderProjects()
+})
+$('sort-order').addEventListener('change', (event) => {
+  view.sort = event.target.value
+  renderProjects()
+})
+const setLayout = (layout) => {
+  view.layout = layout
+  localStorage.setItem('control-plane.layout', layout)
+  $('view-grid').setAttribute('aria-pressed', String(layout === 'grid'))
+  $('view-list').setAttribute('aria-pressed', String(layout === 'list'))
+  renderProjects()
+}
+$('view-grid').addEventListener('click', () => setLayout('grid'))
+$('view-list').addEventListener('click', () => setLayout('list'))
+$('view-grid').setAttribute('aria-pressed', String(view.layout === 'grid'))
+$('view-list').setAttribute('aria-pressed', String(view.layout === 'list'))
+document.addEventListener('click', closeMenus)
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeMenus()
+})
 function submit(formId, action) {
   $(formId).addEventListener('submit', async (event) => {
     event.preventDefault()
@@ -1675,6 +1914,7 @@ $('logout').addEventListener('click', async () => {
 try {
   me = await api('/api/me')
   $('identity').textContent = me.role
+  $('identity').hidden = false
   $('login').hidden = true
   $('logout').hidden = false
   $('new-project').hidden = !['owner', 'operator'].includes(me.role)
