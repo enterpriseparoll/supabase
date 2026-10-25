@@ -133,7 +133,11 @@ test('public gateway has no route to Studio, metadata, analytics, or catch-all a
   assert(routes.some((row) => row.route?.cluster === 'storage'))
   assert(routes.some((row) => row.route?.cluster === 'realtime'))
   assert(!routes.some((row) => ['studio', 'meta', 'analytics'].includes(row.route?.cluster)))
-  assert.deepEqual(routes.at(-1), { match: { prefix: '/' }, direct_response: { status: 404 } })
+  const fallback = routes.at(-1)
+  assert.deepEqual(fallback.match, { prefix: '/' })
+  assert.deepEqual(fallback.direct_response, { status: 404 })
+  // No dashboard password prompt on the public API URL.
+  assert.equal(fallback.typed_per_filter_config['envoy.filters.http.basic_auth'].disabled, true)
   assert.deepEqual(config.access_log, [])
 })
 test('environment values do not become new variables or Compose expansions', () => {

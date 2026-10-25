@@ -49,7 +49,18 @@ export function publicGateway(source) {
         if (!config?.route_config) continue
         for (const host of config.route_config.virtual_hosts) {
           host.routes = host.routes.filter((route) => allowed.has(route.route?.cluster))
-          host.routes.push({ match: { prefix: '/' }, direct_response: { status: 404 } })
+          // Plain 404 for anything else. Disable the dashboard Basic Auth filter here,
+          // or browsers opening the API URL get a password prompt for nothing.
+          host.routes.push({
+            match: { prefix: '/' },
+            direct_response: { status: 404 },
+            typed_per_filter_config: {
+              'envoy.filters.http.basic_auth': {
+                '@type': 'type.googleapis.com/envoy.config.route.v3.FilterConfig',
+                disabled: true,
+              },
+            },
+          })
         }
         // Access logs must not include API keys, bearer tokens, or handoff URLs.
         config.access_log = []
