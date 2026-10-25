@@ -564,3 +564,88 @@ test('local mode signs in with the generated token over plain HTTP', async () =>
     await new Promise((resolve) => local.close(resolve))
   }
 })
+test('resizing reserves capacity against other projects and restarts with new limits', async () => {
+  const limited = { ...config, capacityMb: 12288, capacityCpus: 6 }
+  await pool.query("UPDATE control.projects SET status='deleted'")
+  const first = await createProject(pool, limited, 'owner', input, 'resize-first')
+  const second = await createProject(pool, limited, 'owner', input, 'resize-second')
+  // 4096 + 4096 in use; growing one to 8192 needs 12288 total: allowed.
+  const grow = await requestOperation(
+    pool,
+    limited,
+    'owner',
+    first.project_id,
+    'resize',
+    { memoryMb: 8192, cpus: 3 },
+    'resize-grow'
+  )
+  assert.deepEqual(grow.payload, { memoryMb: 8192, cpus: 3 })
+  const reserved = (
+    await pool.query('SELECT memory_mb,cpus FROM control.projects WHERE id=$1', [first.project_id])
+  ).rows[0]
+  assert.deepEqual([reserved.memory_mb, Number(reserved.cpus)], [8192, 3])
+  // The other project cannot now grow past the remaining 4096 MiB.
+  await assert.rejects(
+    requestOperation(
+      pool,
+      limited,
+      'owner',
+      second.project_id,
+      'resize',
+      { memoryMb: 6144, cpus: 2 },
+      'resize-too-big'
+    ),
+    { status: 409, message: /4096 MiB/ }
+  )
+  for (const bad of [{ memoryMb: 1024, cpus: 2 }, { memoryMb: 4096, cpus: 0 }, {}])
+    await assert.rejects(
+      requestOperation(
+        pool,
+        limited,
+        'owner',
+        second.project_id,
+        'resize',
+        bad,
+        `bad-${Math.random()}`.replace('.', '')
+      ),
+      { status: 400 }
+    )
+  await assert.rejects(
+    requestOperation(
+      pool,
+      limited,
+      'viewer',
+      first.project_id,
+      'resize',
+      { memoryMb: 4096, cpus: 2 },
+      'viewer-resize'
+    ),
+    { status: 403 }
+  )
+  // The worker re-renders, then restarts, then marks the project ready.
+  const calls = []
+  const fake = {
+    async invalidate(project) {
+      calls.push(['invalidate', project.memory_mb])
+    },
+    async stop() {
+      calls.push(['stop'])
+    },
+    async up(project) {
+      calls.push(['up', project.memory_mb, Number(project.cpus)])
+    },
+  }
+  await pool.query("UPDATE control.operations SET state='succeeded' WHERE kind='create'")
+  for (let count = 0; count < 20; count++) {
+    const state = (await pool.query('SELECT state FROM control.operations WHERE id=$1', [grow.id]))
+      .rows[0].state
+    if (state === 'succeeded') break
+    await runOne(pool, limited, fake)
+  }
+  assert.deepEqual(calls, [['invalidate', 8192], ['stop'], ['up', 8192, 3]])
+  assert.equal(
+    (await pool.query('SELECT status FROM control.projects WHERE id=$1', [first.project_id]))
+      .rows[0].status,
+    'ready'
+  )
+})

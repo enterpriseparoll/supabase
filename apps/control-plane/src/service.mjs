@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { audit, roleFor, transaction } from './database.mjs'
 import {
+  allocationInput,
   authorize,
   generateSecrets,
   hash,
@@ -134,6 +135,7 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
       'upgrade',
       'rollback',
       'recover',
+      'resize',
     ].includes(kind),
     400,
     'Unsupported operation'
@@ -158,6 +160,7 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
       )
       payload.release = input.release
     }
+    if (kind === 'resize') Object.assign(payload, allocationInput(input))
     const requestHash = hash(JSON.stringify({ id, kind, payload }))
     const prior = (
       await db.query('SELECT * FROM control.operations WHERE actor=$1 AND idempotency_key=$2', [
@@ -181,6 +184,28 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
         404,
         'Backup not found for this project'
       )
+    if (kind === 'resize') {
+      // Reserve the new allocation now so concurrent requests cannot oversubscribe;
+      // the queued operation re-renders and restarts the stack with it.
+      invariant(project.status !== 'deleted', 409, 'Project is deleted')
+      const others = (
+        await db.query(
+          "SELECT COALESCE(sum(memory_mb),0)::int AS memory,COALESCE(sum(cpus),0)::float AS cpus FROM control.projects WHERE status<>'deleted' AND id<>$1",
+          [id]
+        )
+      ).rows[0]
+      invariant(
+        others.memory + payload.memoryMb <= config.capacityMb &&
+          others.cpus + payload.cpus <= config.capacityCpus,
+        409,
+        `Host capacity exceeded. ${config.capacityMb - others.memory} MiB and ${Number((config.capacityCpus - others.cpus).toFixed(2))} CPU are available for this project.`
+      )
+      await db.query('UPDATE control.projects SET memory_mb=$2,cpus=$3 WHERE id=$1', [
+        id,
+        payload.memoryMb,
+        payload.cpus,
+      ])
+    }
     if (kind === 'recover') {
       invariant(project.status === 'deleted', 409, 'Project is not deleted')
       const allocation = (

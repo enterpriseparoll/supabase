@@ -76,6 +76,53 @@ function confirm(project, kind, extra = {}) {
   }
   $('confirm-dialog').showModal()
 }
+// Changing memory/CPU restarts the project with the new limits. Data is kept.
+function resourcesForm(project) {
+  const form = element('form', '', 'space-y-4 rounded border border-border p-4')
+  form.append(element('h3', 'Resources', 'font-semibold'))
+  form.append(
+    element(
+      'p',
+      'Saving restarts this project with the new limits. Data is kept. The project is unavailable for a few minutes.',
+      'text-sm text-subtle'
+    )
+  )
+  const grid = element('div', '', 'grid grid-cols-2 gap-4')
+  const field = (label, name, value, attributes) => {
+    const wrapper = element('label', label, 'block text-sm')
+    const input = document.createElement('input')
+    Object.assign(input, { name, type: 'number', required: true, value: String(value) })
+    for (const [key, attribute] of Object.entries(attributes)) input.setAttribute(key, attribute)
+    input.className = 'mt-2'
+    wrapper.append(input)
+    return wrapper
+  }
+  grid.append(
+    field('Memory (MiB)', 'memoryMb', project.memoryMb, { min: 2048, max: 131072, step: 512 }),
+    field('CPU', 'cpus', project.cpus, { min: 1, max: 32, step: 0.5 })
+  )
+  form.append(grid)
+  const save = element('button', 'Save and restart')
+  save.type = 'submit'
+  form.append(save)
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const values = Object.fromEntries(new FormData(form))
+    save.disabled = true
+    try {
+      await operation(project, 'resize', {
+        memoryMb: Number(values.memoryMb),
+        cpus: Number(values.cpus),
+      })
+      detail(await api(`/api/projects/${project.id}`))
+    } catch (error) {
+      notice(error.message)
+    } finally {
+      save.disabled = false
+    }
+  })
+  return form
+}
 async function detail(project) {
   selected = project.id
   const root = $('detail')
@@ -128,6 +175,7 @@ async function detail(project) {
     if (project.role === 'owner')
       actions.append(button('Delete project', () => confirm(project, 'delete')))
     root.append(actions)
+    root.append(resourcesForm(project))
   }
   root.append(element('h3', 'Resource usage', 'font-semibold'))
   root.append(

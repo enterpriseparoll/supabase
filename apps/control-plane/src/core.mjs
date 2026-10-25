@@ -40,6 +40,15 @@ export function domainName(value) {
   )
   return value
 }
+export function allocationInput({ memoryMb, cpus }) {
+  invariant(
+    Number.isInteger(memoryMb) && memoryMb >= 2048 && memoryMb <= 131072,
+    400,
+    'Memory must be 2048–131072 MiB'
+  )
+  invariant(Number.isFinite(cpus) && cpus >= 1 && cpus <= 32, 400, 'CPU allocation must be 1–32')
+  return { memoryMb, cpus }
+}
 export function projectInput(input, { allowLocalhost = false } = {}) {
   invariant(
     input && typeof input === 'object' && !Array.isArray(input),
@@ -76,14 +85,10 @@ export function projectInput(input, { allowLocalhost = false } = {}) {
       ? 'Enter an HTTPS or http://localhost application URL'
       : 'Enter an HTTPS application URL'
   )
-  const memoryMb = input.memoryMb ?? 4096
-  const cpus = input.cpus ?? 2
-  invariant(
-    Number.isInteger(memoryMb) && memoryMb >= 2048 && memoryMb <= 131072,
-    400,
-    'Memory must be 2048–131072 MiB'
-  )
-  invariant(Number.isFinite(cpus) && cpus >= 1 && cpus <= 32, 400, 'CPU allocation must be 1–32')
+  const { memoryMb, cpus } = allocationInput({
+    memoryMb: input.memoryMb ?? 4096,
+    cpus: input.cpus ?? 2,
+  })
   return { name: input.name.trim(), siteUrl: site.href, memoryMb, cpus }
 }
 const permissions = {
@@ -224,5 +229,6 @@ export function operationAction(kind) {
   if (kind === 'restore' || kind === 'recover') return 'restore'
   if (['upgrade', 'rollback'].includes(kind)) return 'restore'
   if (['verify-domain', 'remove-domain'].includes(kind)) return 'domains'
+  // resize falls through to 'operate': operators manage service allocations.
   return 'operate'
 }

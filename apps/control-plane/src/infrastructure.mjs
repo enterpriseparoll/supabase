@@ -62,6 +62,10 @@ export class Infrastructure {
       options
     )
   }
+  // Forces the next start to re-render the stack (server mode caches renders).
+  async invalidate(project) {
+    await rm(`${this.directory(project.id)}/.prepared`, { force: true })
+  }
   async prepare(project) {
     const directory = await this.safeDirectory(project.id)
     const marker = `${directory}/.prepared`

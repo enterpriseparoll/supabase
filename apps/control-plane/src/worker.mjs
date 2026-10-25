@@ -91,8 +91,9 @@ export async function runOne(pool, config, infrastructure) {
           'PROJECT_DELETED'
         )
         const kind = operation.kind
-        if (['create', 'start', 'restart', 'recover'].includes(kind)) {
-          if (kind === 'restart') await infrastructure.stop(project)
+        if (['create', 'start', 'restart', 'recover', 'resize'].includes(kind)) {
+          if (kind === 'resize') await infrastructure.invalidate(project)
+          if (['restart', 'resize'].includes(kind)) await infrastructure.stop(project)
           await infrastructure.up(project)
         } else if (kind === 'stop') await infrastructure.stop(project)
         else if (kind === 'delete') await infrastructure.destroy(project)
@@ -116,6 +117,7 @@ export async function runOne(pool, config, infrastructure) {
             start: 'ready',
             restart: 'ready',
             recover: 'ready',
+            resize: 'ready',
             stop: 'stopped',
             delete: 'deleted',
           }[kind]
@@ -175,6 +177,7 @@ export async function runOne(pool, config, infrastructure) {
               'restore',
               'upgrade',
               'rollback',
+              'resize',
             ].includes(operation.kind) &&
             error.status !== 403
           )
