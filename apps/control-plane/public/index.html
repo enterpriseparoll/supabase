@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Supabase project platform</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/dashboard.mjs"></script>
+  </head>
+  <body class="bg-background text-foreground font-sans antialiased">
+    <div class="mx-auto max-w-6xl px-6 py-8">
+      <header
+        class="mb-12 flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6"
+      >
+        <a href="/" class="text-lg font-semibold tracking-tight">Supabase / Your infrastructure</a>
+        <nav class="flex items-center gap-3" aria-label="Account">
+          <span id="identity" class="text-sm text-subtle"></span
+          ><a id="login" href="/auth/login" class="rounded border border-border px-4 py-2"
+            >Sign in</a
+          ><button id="members" hidden>Manage access</button
+          ><button id="audit" hidden>Audit log</button><button id="logout" hidden>Sign out</button>
+        </nav>
+      </header>
+      <main>
+        <div class="mb-8 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p class="mb-2 text-sm text-subtle">SELF-HOSTED PLATFORM</p>
+            <h1 class="text-3xl font-semibold tracking-tight">Your projects</h1>
+            <p class="mt-3 max-w-2xl text-subtle">
+              Independent databases, Auth, Storage, and Realtime. Create projects as your
+              infrastructure grows.
+            </p>
+          </div>
+          <button id="new-project" hidden>Create project</button>
+        </div>
+        <p id="notice" role="status" aria-live="polite" class="my-4 text-sm"></p>
+        <div id="projects" class="grid gap-5 md:grid-cols-2 xl:grid-cols-3"></div>
+        <button id="more" class="mt-6" hidden>Load more projects</button>
+      </main>
+      <footer class="mt-12 border-t border-border pt-5 text-sm text-subtle">
+        Project count has no fixed limit. CPU, memory, and disk capacity apply. Deleted project data
+        is retained for recovery.
+      </footer>
+    </div>
+    <dialog id="create-dialog" aria-labelledby="create-title">
+      <form id="create-form" class="space-y-5">
+        <h2 id="create-title" class="text-xl font-semibold">Create project</h2>
+        <label class="block"
+          >Project name<input name="name" maxlength="80" required class="mt-2" /></label
+        ><label class="block"
+          >Application URL<input
+            name="siteUrl"
+            type="url"
+            placeholder="https://app.example.com"
+            required
+            class="mt-2"
+          /><span class="text-sm text-subtle">HTTPS URL used for Auth redirects.</span></label
+        >
+        <div class="grid grid-cols-2 gap-4">
+          <label
+            >Memory (MiB)<input
+              name="memoryMb"
+              type="number"
+              min="2048"
+              max="131072"
+              value="4096"
+              required
+              class="mt-2" /></label
+          ><label
+            >CPU allocation<input
+              name="cpus"
+              type="number"
+              min="1"
+              max="32"
+              step="0.25"
+              value="2"
+              required
+              class="mt-2"
+          /></label>
+        </div>
+        <p class="text-sm text-subtle">
+          The worker creates an isolated stack and publishes its API after health checks pass.
+        </p>
+        <div class="flex justify-end gap-3">
+          <button type="button" data-close>Cancel</button
+          ><button type="submit">Create project</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="detail-dialog" aria-labelledby="detail-title">
+      <header class="mb-6 flex items-center justify-between gap-4">
+        <h2 id="detail-title" class="text-xl font-semibold">Project</h2>
+        <button data-close>Close</button>
+      </header>
+      <div id="detail" class="space-y-5"></div>
+    </dialog>
+    <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+      <form id="confirm-form" class="space-y-5">
+        <h2 id="confirm-title" class="text-xl font-semibold">Confirm operation</h2>
+        <p id="confirm-description" class="text-subtle"></p>
+        <label class="block"
+          >Project ID<input name="confirmation" required autocomplete="off" class="mt-2"
+        /></label>
+        <div class="flex justify-end gap-3">
+          <button type="button" data-close>Cancel</button><button type="submit">Continue</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="access-dialog" aria-labelledby="access-title">
+      <h2 id="access-title" class="mb-5 text-xl font-semibold">Manage platform access</h2>
+      <p class="mb-5 text-sm text-subtle">
+        Use the exact subject from your identity provider. Platform roles apply to every project.
+        Project roles can be managed through the API.
+      </p>
+      <form id="access-form" class="space-y-4">
+        <label class="block"
+          >OIDC subject<input name="subject" required maxlength="255" class="mt-2" /></label
+        ><label class="block"
+          >Role<select name="role" class="mt-2">
+            <option value="viewer">Viewer</option>
+            <option value="operator">Operator</option>
+            <option value="owner">Owner</option>
+            <option value="revoked">Revoke all access</option>
+          </select></label
+        >
+        <div class="flex justify-end gap-3">
+          <button type="button" data-close>Close</button><button type="submit">Save access</button>
+        </div>
+      </form>
+      <pre id="access-list" class="mt-5 overflow-x-auto whitespace-pre-wrap text-sm"></pre>
+    </dialog>
+  </body>
+</html>

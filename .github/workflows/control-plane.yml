@@ -1,0 +1,54 @@
+name: Self-hosted Control Plane
+on:
+  pull_request:
+    paths: ['apps/control-plane/**', 'deploy/platform/**', 'docker/**', '.github/workflows/control-plane.yml']
+  push:
+    branches: [master]
+    paths: ['apps/control-plane/**', 'deploy/platform/**', 'docker/**', '.github/workflows/control-plane.yml']
+permissions:
+  contents: read
+concurrency:
+  group: control-plane-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+        env:
+          POSTGRES_PASSWORD: integration-only
+          POSTGRES_DB: control_test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 20
+    defaults:
+      run:
+        working-directory: apps/control-plane
+    env:
+      CONTROL_TEST_DATABASE_URL: postgresql://postgres:integration-only@127.0.0.1:5432/control_test
+      CONTROL_TEST_RUNTIME_ROLES: 'true'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '22' }
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:integration
+      - run: CHECK_ENVOY=true node scripts/docker-check.mjs
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=moderate
+      - run: docker build -f deploy/platform/Dockerfile -t supabase-platform:test .
+        working-directory: .
+      - run: docker run --rm --user 0:0 --network none --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges:true supabase-platform:test node scripts/firewall-check.mjs
+      - name: Encrypted backup and restore drill
+        run: |
+          docker run -d --name platform-control-test-ci -e POSTGRES_PASSWORD=integration-only postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+          for attempt in $(seq 1 30); do
+            if docker exec platform-control-test-ci pg_isready -U postgres; then break; fi
+            sleep 1
+          done
+          docker run --rm --user 0:0 -v /var/run/docker.sock:/var/run/docker.sock -e BACKUP_TEST_CONTAINER=platform-control-test-ci -e BACKUP_TEST_USER=postgres supabase-platform:test node scripts/backup-check.mjs
+      - if: always()
+        run: docker rm -f platform-control-test-ci || true

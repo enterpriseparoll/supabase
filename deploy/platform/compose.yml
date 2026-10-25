@@ -1,0 +1,155 @@
+name: supabase-platform
+
+x-runtime: &runtime
+  image: ${PLATFORM_IMAGE:-supabase-platform:local}
+  build:
+    context: ../..
+    dockerfile: deploy/platform/Dockerfile
+  init: true
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: local
+    options: { max-size: 10m, max-file: '3' }
+  environment: &environment
+    PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:?Set PLATFORM_DOMAIN}
+    OIDC_ISSUER: ${OIDC_ISSUER:?Set OIDC_ISSUER}
+    OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set OIDC_CLIENT_ID}
+    OIDC_REQUIRED_ACR: ${OIDC_REQUIRED_ACR:?Set OIDC_REQUIRED_ACR}
+    OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc_client_secret
+    MASTER_KEY_FILE: /run/secrets/master_key
+    DATABASE_URL_FILE: /run/secrets/database_url_api
+    PLATFORM_DATA_ROOT: ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}
+    PLATFORM_ROUTE_ROOT: ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/routes
+    HOST_CAPACITY_MB: ${HOST_CAPACITY_MB:-12288}
+    HOST_CAPACITY_CPUS: ${HOST_CAPACITY_CPUS:-3}
+  secrets: [oidc_client_secret, master_key, database_url_api]
+
+services:
+  control-db:
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: control_owner
+      POSTGRES_DB: control
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_owner_password
+    secrets: [db_owner_password, db_api_password, db_worker_password]
+    volumes:
+      - control-db:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/10-platform.sh:ro
+    networks: [control]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U control_owner -d control']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 1024m
+    cpus: 1
+    logging: { driver: local, options: { max-size: 10m, max-file: '3' } }
+
+  migrate:
+    <<: *runtime
+    restart: 'no'
+    command: [node, src/cli.mjs, migrate]
+    environment:
+      <<: *environment
+      DATABASE_URL_FILE: /run/secrets/database_url_owner
+    secrets: [oidc_client_secret, master_key, database_url_owner]
+    depends_on:
+      control-db: { condition: service_healthy }
+    networks: [control]
+
+  api:
+    <<: *runtime
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [control, edge]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 128
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    <<: *runtime
+    user: '0:0'
+    command: [node, src/worker.mjs]
+    environment:
+      <<: *environment
+      DATABASE_URL_FILE: /run/secrets/database_url_worker
+      ENABLE_DOCKER_WORKER: 'true'
+      PLATFORM_IMAGE: ${PLATFORM_IMAGE:-supabase-platform:local}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      AWS_ACCESS_KEY_ID: ${BACKUP_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY_FILE: /run/secrets/backup_secret
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+    secrets: [oidc_client_secret, master_key, database_url_worker, restic_password, backup_secret]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}:${PLATFORM_DATA_ROOT:-/srv/supabase-platform}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [control, worker-egress]
+    mem_limit: 1024m
+    cpus: 1
+
+  traefik:
+    image: traefik:v3@sha256:c8a121e4bb1347e8fd52657fab12f2cb70b68f8a018895e2068f92c9e519b9c2
+    container_name: supabase-platform-traefik
+    restart: unless-stopped
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.websecure.address=:443
+      - --providers.file.directory=/routes
+      - --providers.file.watch=true
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?Set ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencrypt.acme.caserver=${ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+      - --api.dashboard=false
+      - --log.level=ERROR
+    ports: ['80:80', '443:443']
+    volumes:
+      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/routes:/routes:ro
+      - acme:/acme
+    networks: [edge]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1
+
+  bootstrap-owner:
+    <<: *runtime
+    restart: 'no'
+    profiles: [tools]
+    entrypoint: [node, src/cli.mjs, bootstrap-owner]
+    environment:
+      <<: *environment
+      DATABASE_URL_FILE: /run/secrets/database_url_owner
+    secrets: [oidc_client_secret, master_key, database_url_owner]
+    networks: [control]
+
+networks:
+  control: { internal: true }
+  edge: {}
+  worker-egress: {}
+volumes:
+  control-db: {}
+  acme: {}
+secrets:
+  db_owner_password: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/db_owner_password' }
+  db_api_password: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/db_api_password' }
+  db_worker_password: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/db_worker_password' }
+  database_url_owner: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/database_url_owner' }
+  database_url_api: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/database_url_api' }
+  database_url_worker: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/database_url_worker' }
+  master_key: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/master_key' }
+  oidc_client_secret: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/oidc_client_secret' }
+  restic_password: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/restic_password' }
+  backup_secret: { file: '${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets/backup_secret' }

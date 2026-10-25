@@ -1,0 +1,13 @@
+**
+!apps/
+!apps/control-plane/
+!apps/control-plane/**
+!docker/
+!docker/**
+**/node_modules
+**/.env
+**/.env.*
+!docker/.env.example
+**/volumes/db/data
+**/volumes/storage
+**/backups
