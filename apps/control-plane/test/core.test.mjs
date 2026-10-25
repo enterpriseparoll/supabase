@@ -154,7 +154,12 @@ test('public gateway has no route to Studio, metadata, analytics, or catch-all a
   assert.deepEqual(fallback.direct_response, { status: 404 })
   // No dashboard password prompt on the public API URL.
   assert.equal(fallback.typed_per_filter_config['envoy.filters.http.basic_auth'].disabled, true)
-  assert.deepEqual(config.access_log, [])
+  const format = config.access_log[0].typed_config.log_format.json_format
+  assert.equal(format.path, '%PATH(NQ:PATH)%')
+  assert.equal(format.status, '%RESPONSE_CODE%')
+  assert(!JSON.stringify(format).includes('AUTHORIZATION'))
+  assert(!JSON.stringify(format).includes('APIKEY'))
+  assert(!JSON.stringify(format).includes('WQ'))
 })
 test('environment values do not become new variables or Compose expansions', () => {
   const env = renderEnv('NAME=default\nOTHER=keep', { NAME: 'hello ${PRIVATE_SECRET}' })

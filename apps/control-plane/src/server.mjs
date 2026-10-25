@@ -5,6 +5,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { configuration } from './config.mjs'
 import { localLoginPage } from './login-page.mjs'
+import { logsInput } from './logs.mjs'
 import { database, audit, roleFor, sessionSubject, transaction } from './database.mjs'
 import { authenticate, cookieValue, oidcClient, sessionCookie, verifyOrigin } from './auth.mjs'
 import { createAccessToken, listAccessTokens, revokeAccessToken, tokenSubject } from './tokens.mjs'
@@ -101,11 +102,14 @@ export function managementServer(pool, config, oidc) {
     // AI agents call tools in quick bursts.
     mcp: rateLimiter(config.rateLimits?.mcp ?? { capacity: 120, perMinute: 120 }),
     webhook: rateLimiter({ capacity: 60, perMinute: 60 }),
+    logs: rateLimiter({ capacity: 12, perMinute: 30 }),
   }
   const assets = new Map([
     ['/', ['index.html', 'text/html']],
     ['/dashboard.mjs', ['dashboard.mjs', 'text/javascript']],
     ['/login.mjs', ['login.mjs', 'text/javascript']],
+    ['/logs.mjs', ['logs.mjs', 'text/javascript']],
+    ['/logs.utils.mjs', ['logs.utils.mjs', 'text/javascript']],
     ['/styles.css', ['styles.css', 'text/css']],
   ])
   const studioUrl = (id) => publicUrl(config, `${id}.studio.${config.baseDomain}`)
@@ -512,11 +516,26 @@ export function managementServer(pool, config, oidc) {
           return
         }
         const match = path.match(
-          /^\/api\/projects\/([^/]+)(?:\/(secrets|operations|backups|domains|studio-ticket|members|insights|stats|schema-snapshots|backup-settings|github|github\/webhook-secret|types))?$/
+          /^\/api\/projects\/([^/]+)(?:\/(secrets|operations|backups|domains|studio-ticket|members|insights|stats|schema-snapshots|backup-settings|github|github\/webhook-secret|types|logs))?$/
         )
         if (match) {
           const id = projectId(match[1]),
             resource = match[2]
+          if (resource === 'logs' && request.method === 'GET') {
+            await projectAccess(pool, subject, id, 'operate')
+            invariant(
+              limits.logs.take(`${subject}:${id}`),
+              429,
+              'Too many log requests. Wait a moment and try again.'
+            )
+            const filters = Object.fromEntries(url.searchParams)
+            logsInput(filters)
+            return send(
+              response,
+              200,
+              await liveRequest(pool, { subject, project: id, kind: 'logs', payload: filters })
+            )
+          }
           if (!resource && request.method === 'GET') {
             const project = await projectAccess(pool, subject, id, 'read')
             return send(

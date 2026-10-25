@@ -33,6 +33,27 @@ Settings (set in the shell or a `.env` file next to `compose.local.yml`):
   Desktop recreates the rest of its VM, including `/srv`, every time it restarts,
   which deletes everything stored there.
 
+### Project logs
+
+Open a project from the dashboard and select **Logs**. Owners and operators can
+filter API Gateway, Postgres, PostgREST, Auth, Storage, Edge Functions, Realtime,
+and pooler logs by time range, level, and text. Select an entry for its details,
+use **Start live** to refresh every five seconds, or download the current result
+as CSV. Retained logs remain readable while a project is paused.
+
+The worker reads only that project's containers. Each request reads up to 500
+recent entries per service and returns up to 500 matches; narrow the filters
+when the result limit is reached. History follows Docker's existing log rotation,
+so rotated or removed container logs cannot be recovered. Known project secrets
+and common credential fields are redacted before results are stored or returned.
+Log contents can still include application data; viewers cannot access them.
+
+Restart existing projects after updating the platform to enable structured
+gateway access logs and normal Postgres diagnostics. Gateway logs include method,
+path without query parameters, response status, and duration, without headers or
+request bodies. The viewer uses container logs; it does not require Logflare or
+provide a SQL analytics engine.
+
 ### Backups, migrations, schema history, and performance
 
 Each project drawer has **Backups**, **Migrations**, **Schema**, and **Performance**

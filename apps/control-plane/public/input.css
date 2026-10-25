@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @source './index.html';
 @source './dashboard.mjs';
+@source './logs.mjs';
 @source '../src/login-page.mjs';
 @theme inline {
   --color-background: var(--background);
@@ -153,6 +154,32 @@
   }
 }
 @layer components {
+  .logs-toolbar {
+    @apply grid gap-3 sm:grid-cols-2;
+  }
+  .logs-toolbar label {
+    @apply min-w-0;
+  }
+  .logs-histogram {
+    @apply flex h-16 items-end gap-1 border-b border-border pb-2;
+  }
+  .logs-bar {
+    @apply min-w-0 flex-1 rounded-t-sm;
+  }
+  .logs-list {
+    @apply max-h-[28rem] overflow-auto rounded-lg border border-border;
+  }
+  .logs-list table {
+    @apply min-w-[40rem];
+  }
+  .logs-message {
+    @apply line-clamp-2 w-full rounded border-0 p-1 text-left font-mono leading-5 break-words hover:bg-muted;
+  }
+  @media (min-width: 1280px) {
+    .logs-toolbar {
+      grid-template-columns: 1.1fr 1fr 0.8fr 1.4fr auto;
+    }
+  }
   .login-layout {
     @apply grid min-h-dvh lg:grid-cols-2;
   }

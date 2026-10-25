@@ -8,6 +8,7 @@ import { Infrastructure } from './infrastructure.mjs'
 import { pollGithub, runDeployment } from './github.mjs'
 import { serveLiveRequests } from './live.mjs'
 import { ProjectDatabase } from './project-db.mjs'
+import { ProjectLogs } from './logs.mjs'
 
 const safeErrorCodes = new Set([
   'COMMAND_FAILED',
@@ -355,11 +356,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const infrastructure = new Infrastructure(config, pool)
   const projectDb = new ProjectDatabase(config, infrastructure)
   infrastructure.projectDb = projectDb
+  const projectLogs = new ProjectLogs(config)
   // Interactive requests (SQL, types, functions) run beside the operation queue.
   const live = serveLiveRequests(pool, {
     sql: (project, payload, options) => projectDb.sql(project, payload, options),
     types: (project, payload) => projectDb.types(project, payload),
     functions: (project, payload) => projectDb.functions(project, payload),
+    logs: (project, payload) => projectLogs.read(project, payload),
     'deploy-function': (project, payload) => projectDb.deployFunction(project, payload),
     migrations: (project) => projectDb.migrations(project),
     'apply-migration': (project, payload) => projectDb.applyNamedMigration(project, payload),

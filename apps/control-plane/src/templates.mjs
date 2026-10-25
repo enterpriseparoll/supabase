@@ -91,6 +91,10 @@ export function renderCompose(source, project, { local = false } = {}) {
     compose.services.supavisor.networks.egress = {}
   }
   compose.services.auth.environment.GOTRUE_JWT_KEYS = '${JWT_KEYS}'
+  // Restore normal server diagnostics; the upstream template suppresses all but fatal messages.
+  compose.services.db.command = compose.services.db.command.map((arg) =>
+    arg === 'log_min_messages=fatal' ? 'log_min_messages=warning' : arg
+  )
   compose.services.rest.environment.PGRST_JWT_SECRET = '${JWT_JWKS}'
   compose.services.realtime.environment.API_JWT_JWKS = '${JWT_JWKS}'
   compose.services.storage.environment.JWT_JWKS = '${JWT_JWKS}'
@@ -120,8 +124,26 @@ export function publicGateway(source) {
             },
           })
         }
-        // Access logs must not include API keys, bearer tokens, or handoff URLs.
-        config.access_log = []
+        // Only method, path without query, status, and timing. Never headers or tokens.
+        config.access_log = [
+          {
+            name: 'envoy.access_loggers.stdout',
+            typed_config: {
+              '@type':
+                'type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog',
+              log_format: {
+                json_format: {
+                  timestamp: '%START_TIME%',
+                  method: '%REQ(:METHOD)%',
+                  path: '%PATH(NQ:PATH)%',
+                  status: '%RESPONSE_CODE%',
+                  duration_ms: '%DURATION%',
+                  message: '%REQ(:METHOD)% %PATH(NQ:PATH)% %RESPONSE_CODE%',
+                },
+              },
+            },
+          },
+        ]
       }
   return stringify(doc, { lineWidth: 0 })
 }

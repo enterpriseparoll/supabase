@@ -1,3 +1,5 @@
+import { renderProjectLogs } from './logs.mjs'
+
 const $ = (id) => document.getElementById(id)
 const projects = new Map()
 const pendingOperations = new Map()
@@ -268,6 +270,7 @@ function resourcesForm(project) {
 // The project drawer is split into tabs; the chosen tab is kept across projects.
 const detailTabs = {
   Overview: renderOverview,
+  Logs: (project, root) => renderProjectLogs(project, root, { api, button }),
   Backups: renderBackups,
   Migrations: renderMigrations,
   Schema: renderSchema,
@@ -1757,6 +1760,14 @@ function cardMenu(project, card) {
       running ? 'Pause project' : 'Resume project',
       () => operation(project, running ? 'stop' : 'start'),
     ])
+  if (canOperate)
+    items.push([
+      'View logs',
+      async () => {
+        activeTab = 'Logs'
+        await detail(await api(`/api/projects/${project.id}`))
+      },
+    ])
   items.push(['Manage project', async () => detail(await api(`/api/projects/${project.id}`))])
   const kebab = element('button', '', 'kebab')
   kebab.type = 'button'
@@ -1777,7 +1788,8 @@ function cardMenu(project, card) {
       })
       item.className = 'menu-item'
       item.setAttribute('role', 'menuitem')
-      if (label !== 'Manage project' && pendingOperations.has(project.id)) item.disabled = true
+      if (!['Manage project', 'View logs'].includes(label) && pendingOperations.has(project.id))
+        item.disabled = true
       menu.append(item)
     }
     card.append(menu)
@@ -2188,6 +2200,17 @@ $('view-list').addEventListener('click', () => setLayout('list'))
 $('view-grid').setAttribute('aria-pressed', String(view.layout === 'grid'))
 $('view-list').setAttribute('aria-pressed', String(view.layout === 'list'))
 document.addEventListener('click', closeMenus)
+window.addEventListener('hashchange', async () => {
+  const match = location.hash.match(/^#project\/(p[a-f0-9]{24})\/logs$/)
+  if (!match) return
+  try {
+    activeTab = 'Logs'
+    await detail(await api(`/api/projects/${match[1]}`))
+    history.replaceState(null, '', location.pathname)
+  } catch (error) {
+    notice(error.message)
+  }
+})
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeMenus()
 })
@@ -2280,7 +2303,8 @@ try {
   await loadProjects()
   // Deep links: #new and #project/<id> from Studio's switcher, and
   // #new?repo=owner/name&branch=main&dir=supabase from a README deploy link.
-  const [, linked] = location.hash.match(/^#project\/(p[a-f0-9]{24})$/) ?? []
+  const [, linked, linkedTab] =
+    location.hash.match(/^#project\/(p[a-f0-9]{24})(?:\/(logs))?$/) ?? []
   if (location.hash.startsWith('#new') && !$('new-project').hidden) {
     const query = new URLSearchParams(location.hash.split('?')[1] ?? '')
     const form = $('create-form')
@@ -2293,6 +2317,7 @@ try {
     $('create-dialog').showModal()
   } else if (linked) {
     try {
+      if (linkedTab === 'logs') activeTab = 'Logs'
       const project = projects.get(linked) ?? (await api(`/api/projects/${linked}`))
       await detail(project)
     } catch (error) {

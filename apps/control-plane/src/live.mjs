@@ -10,6 +10,7 @@ export const LIVE_KINDS = {
   sql: { action: 'secrets', timeoutMs: 65000 },
   types: { action: 'read', timeoutMs: 65000 },
   functions: { action: 'read', timeoutMs: 30000 },
+  logs: { action: 'operate', timeoutMs: 45000 },
   'deploy-function': { action: 'operate', timeoutMs: 120000 },
   migrations: { action: 'read', timeoutMs: 30000 },
   'apply-migration': { action: 'secrets', timeoutMs: 120000 },
@@ -89,7 +90,11 @@ export function serveLiveRequests(pool, handlers, { concurrency = 4, log = conso
         ])
       ).rows[0]
       invariant(project, 404, 'Project not found')
-      invariant(project.desired_state === 'running', 409, 'The project is paused. Resume it first.')
+      invariant(
+        row.kind === 'logs' || project.desired_state === 'running',
+        409,
+        'The project is paused. Resume it first.'
+      )
       const result = await handlers[row.kind](project, row.payload, { readOnly: row.read_only })
       const size = Buffer.byteLength(JSON.stringify(result ?? null))
       invariant(

@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
 import { backupDownloadPath } from '../src/backup-files.mjs'
+import { serveLiveRequests } from '../src/live.mjs'
 
 const url = process.env.CONTROL_TEST_DATABASE_URL
 const config = {
@@ -1088,6 +1089,53 @@ test('lifecycle operations stay visible after reload and duplicate clicks share 
   assert.equal((await read()).pendingOperation.state, 'running')
   await pool.query("UPDATE control.operations SET state='succeeded' WHERE id=$1", [first.id])
   assert.equal((await read()).pendingOperation, null)
+})
+
+test('project log requests enforce membership and roles and work for paused projects', async () => {
+  const creation = await createProject(pool, config, 'owner', input, randomUUID())
+  const id = creation.project_id
+  await pool.query(
+    "UPDATE control.projects SET status='stopped',desired_state='stopped' WHERE id=$1",
+    [id]
+  )
+  const raw = token()
+  await pool.query(
+    "INSERT INTO control.project_members(project_id,subject,role) VALUES($1,'logs-operator','operator')",
+    [id]
+  )
+  await pool.query(
+    "INSERT INTO control.sessions(token_hash,subject,expires_at) VALUES($1,'logs-operator',now()+interval '1 hour')",
+    [hash(raw)]
+  )
+  let reads = 0
+  const live = serveLiveRequests(
+    pool,
+    {
+      logs: async (project, payload) => {
+        assert.equal(project.id, id)
+        assert.equal(payload.service, 'db')
+        reads++
+        return { entries: [], unavailable: [] }
+      },
+    },
+    { log: { error() {} } }
+  )
+  try {
+    const request = (project, cookie, query = 'service=db') =>
+      fetch(`${base}/api/projects/${project}/logs?${query}`, {
+        headers: { Cookie: `__Host-platform=${cookie}` },
+      })
+    assert.equal((await request(id, viewerCookie)).status, 403)
+    const another = (await listProjects(pool, config, 'owner')).projects.find((p) => p.id !== id)
+    assert.equal((await request(another.id, raw)).status, 403)
+    assert.equal((await request(id, ownerCookie, 'service=../../db')).status, 400)
+    const result = await request(id, raw)
+    assert.equal(result.status, 200)
+    assert.deepEqual((await result.json()).entries, [])
+    assert.equal(reads, 1)
+  } finally {
+    await live.stop()
+  }
 })
 
 test('migration checksums ignore line endings but catch real edits', async () => {
