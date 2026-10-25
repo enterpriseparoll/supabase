@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { diffLines } from './insights.mjs'
 import { backupDownloadName, backupDownloadPath } from './backup-files.mjs'
+import { githubLinkInput } from './github.mjs'
 import { audit, roleFor, transaction } from './database.mjs'
 import {
   allocationInput,
@@ -82,12 +83,21 @@ export async function enqueue(db, { actor, project, kind, payload = {}, key, req
   return operation
 }
 export async function createProject(pool, config, actor, input, key) {
-  const values = projectInput(input, { allowLocalhost: config.local })
+  const { github: repository, ...fields } = input ?? {}
+  const values = projectInput(fields, { allowLocalhost: config.local })
+  // One-click provisioning: the new project follows a repository from the start.
+  const github = repository ? githubLinkInput(repository) : null
   return transaction(pool, async (db) => {
     authorize(await roleFor(db, actor), 'create')
     // Serialize reservations and idempotency checks, not project count.
     await db.query('SELECT pg_advisory_xact_lock(8734142)')
-    const requestHash = hash(JSON.stringify({ kind: 'create', ...values }))
+    const requestHash = hash(
+      JSON.stringify({
+        kind: 'create',
+        ...values,
+        ...(github ? { github: { ...github, token: Boolean(github.token) } } : {}),
+      })
+    )
     const prior = (
       await db.query('SELECT * FROM control.operations WHERE actor=$1 AND idempotency_key=$2', [
         actor,
@@ -133,6 +143,19 @@ export async function createProject(pool, config, actor, input, key) {
       'INSERT INTO control.project_members(project_id,subject,role) VALUES($1,$2,$3)',
       [id, actor, 'owner']
     )
+    if (github)
+      await db.query(
+        'INSERT INTO control.github_links(project_id,repository,branch,directory,encrypted_token,auto_deploy,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)',
+        [
+          id,
+          github.repository,
+          github.branch,
+          github.directory,
+          github.token ? seal({ token: github.token }, config.key, `github:${id}`) : null,
+          github.autoDeploy,
+          actor,
+        ]
+      )
     return enqueue(db, { actor, project: id, kind: 'create', key, requestHash })
   })
 }
@@ -152,6 +175,7 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
       'recover',
       'resize',
       'inspect',
+      'deploy',
     ].includes(kind),
     400,
     'Unsupported operation'
@@ -177,6 +201,7 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
       payload.release = input.release
     }
     if (kind === 'resize') Object.assign(payload, allocationInput(input))
+    if (kind === 'deploy') payload.source = 'manual'
     const requestHash = hash(JSON.stringify({ id, kind, payload }))
     const prior = (
       await db.query('SELECT * FROM control.operations WHERE actor=$1 AND idempotency_key=$2', [
@@ -200,6 +225,14 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
         404,
         'Backup not found for this project'
       )
+    if (kind === 'deploy') {
+      invariant(
+        (await db.query('SELECT 1 FROM control.github_links WHERE project_id=$1', [id])).rowCount,
+        409,
+        'Connect a GitHub repository first'
+      )
+      invariant(project.desired_state === 'running', 409, 'Resume the project before deploying')
+    }
     if (kind === 'resize') {
       // Reserve the new allocation now so concurrent requests cannot oversubscribe;
       // the queued operation re-renders and restarts the stack with it.

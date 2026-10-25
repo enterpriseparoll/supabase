@@ -17,6 +17,7 @@
           <span id="identity" class="text-sm text-subtle"></span
           ><a id="login" href="/auth/login" class="rounded border border-border px-4 py-2"
             >Sign in</a
+          ><button id="tokens" hidden>Access tokens</button
           ><button id="members" hidden>Manage access</button
           ><button id="audit" hidden>Audit log</button><button id="logout" hidden>Sign out</button>
         </nav>
@@ -78,6 +79,46 @@
               class="mt-2"
           /></label>
         </div>
+        <fieldset class="space-y-4 rounded border border-border p-4">
+          <legend class="px-1 font-semibold">Start from GitHub (optional)</legend>
+          <p class="text-sm text-subtle">
+            When the project is ready, its migrations, seed.sql, and Edge Functions are applied, and
+            every push to the branch deploys automatically.
+          </p>
+          <label class="block"
+            >Repository<input
+              name="githubRepository"
+              placeholder="owner/name or https://github.com/owner/name"
+              autocomplete="off"
+              class="mt-2"
+          /></label>
+          <div class="grid grid-cols-2 gap-4">
+            <label
+              >Branch<input
+                name="githubBranch"
+                value="main"
+                autocomplete="off"
+                class="mt-2" /></label
+            ><label
+              >Supabase folder<input
+                name="githubDirectory"
+                value="supabase"
+                autocomplete="off"
+                class="mt-2"
+            /></label>
+          </div>
+          <label class="block"
+            >GitHub token (private repositories)<input
+              name="githubToken"
+              type="password"
+              autocomplete="off"
+              placeholder="github_pat_…"
+              class="mt-2"
+            /><span class="text-sm text-subtle"
+              >A fine-grained token with read access to Contents. Stored encrypted.</span
+            ></label
+          >
+        </fieldset>
         <p class="text-sm text-subtle">
           The worker creates an isolated stack and publishes its API after health checks pass.
         </p>
@@ -93,6 +134,46 @@
         <button data-close>Close</button>
       </header>
       <div id="detail" class="space-y-5"></div>
+    </dialog>
+    <dialog id="tokens-dialog" aria-labelledby="tokens-title">
+      <header class="mb-6 flex items-center justify-between gap-4">
+        <h2 id="tokens-title" class="text-xl font-semibold">Access tokens</h2>
+        <button data-close>Close</button>
+      </header>
+      <p class="mb-5 text-sm text-subtle">
+        Tokens let scripts and AI coding agents (MCP) act as you, with your current role. Treat them
+        like passwords: anyone with a token can do what it allows.
+      </p>
+      <form id="token-form" class="space-y-4">
+        <label class="block"
+          >Name<input
+            name="name"
+            required
+            maxlength="100"
+            placeholder="Claude Code on my laptop"
+            autocomplete="off"
+            class="mt-2"
+        /></label>
+        <div class="grid grid-cols-2 gap-4">
+          <label class="block"
+            >Expires<select name="expiresInDays" class="mt-2">
+              <option value="30">In 30 days</option>
+              <option value="90" selected>In 90 days</option>
+              <option value="365">In a year</option>
+              <option value="">Never</option>
+            </select></label
+          ><label class="flex items-center gap-2 self-end pb-2"
+            ><input type="checkbox" name="readOnly" class="w-auto" />Read-only</label
+          >
+        </div>
+        <p class="text-sm text-subtle">
+          Read-only tokens can view projects and run queries, but can't change data, schema, or
+          projects.
+        </p>
+        <div class="flex justify-end"><button type="submit">Create token</button></div>
+      </form>
+      <div id="token-created" class="mt-5 space-y-2" hidden></div>
+      <div id="token-list" class="mt-6"></div>
     </dialog>
     <dialog id="confirm-dialog" aria-labelledby="confirm-title">
       <form id="confirm-form" class="space-y-5">

@@ -63,6 +63,15 @@ const routes = {
         service: 'management',
         middlewares: ['management-limit', 'management-body'],
       },
+      // MCP tool calls (function files) and GitHub webhooks carry larger bodies.
+      'management-tools': {
+        // Also on 127.0.0.1: outside browsers, Windows does not resolve *.localhost names,
+        // so AI agents (Node, Python) reach MCP at http://127.0.0.1:<port>/mcp.
+        rule: '(Host(`manage.localhost`) || Host(`127.0.0.1`) || Host(`localhost`)) && (Path(`/mcp`) || PathPrefix(`/hooks/`))',
+        ...entry,
+        service: 'management',
+        middlewares: ['management-limit', 'tools-body'],
+      },
     },
     services: { management: { loadBalancer: { servers: [{ url: 'http://api:3000' }] } } },
     middlewares: {
@@ -82,6 +91,7 @@ const routes = {
       },
       'management-limit': { rateLimit: { average: 30, burst: 60 } },
       'management-body': { buffering: { maxRequestBodyBytes: 16384 } },
+      'tools-body': { buffering: { maxRequestBodyBytes: 5242880 } },
       'api-limit': { rateLimit: { average: 200, burst: 400 } },
     },
   },

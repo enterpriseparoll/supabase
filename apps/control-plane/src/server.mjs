@@ -6,6 +6,16 @@ import { pathToFileURL } from 'node:url'
 import { configuration } from './config.mjs'
 import { database, audit, roleFor, sessionSubject, transaction } from './database.mjs'
 import { authenticate, cookieValue, oidcClient, sessionCookie, verifyOrigin } from './auth.mjs'
+import { createAccessToken, listAccessTokens, revokeAccessToken, tokenSubject } from './tokens.mjs'
+import { handleMcpMessage } from './mcp.mjs'
+import { liveRequest } from './live.mjs'
+import {
+  githubStatus,
+  handleWebhook,
+  removeGithubLink,
+  saveGithubLink,
+  webhookSecret,
+} from './github.mjs'
 import {
   authorize,
   cookieName,
@@ -33,21 +43,25 @@ import {
   updateBackupSettings,
 } from './service.mjs'
 
-async function body(request) {
+async function rawBody(request, limit) {
+  const chunks = []
+  let size = 0
+  for await (const chunk of request) {
+    size += chunk.length
+    invariant(size <= limit, 413, 'Request is too large')
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
+}
+async function body(request, limit = 16384) {
   invariant(
     request.headers['content-type']?.split(';')[0] === 'application/json',
     415,
     'Send application/json'
   )
-  const chunks = []
-  let size = 0
-  for await (const chunk of request) {
-    size += chunk.length
-    invariant(size <= 16384, 413, 'Request is too large')
-    chunks.push(chunk)
-  }
+  const raw = await rawBody(request, limit)
   try {
-    return JSON.parse(Buffer.concat(chunks).toString())
+    return JSON.parse(raw.toString())
   } catch {
     throw new HttpError(400, 'Invalid JSON')
   }
@@ -100,11 +114,15 @@ function send(response, status, value, headers = {}) {
 }
 // Credential disclosure, Studio handoff, and access management are stricter than
 // other mutations. Reads are not limited; they are bounded by pagination.
-const sensitivePath = /^\/api\/(?:members|projects\/[^/]+\/(?:secrets|studio-ticket|members))$/
+const sensitivePath =
+  /^\/api\/(?:members|access-tokens|projects\/[^/]+\/(?:secrets|studio-ticket|members|github\/webhook-secret))$/
 export function managementServer(pool, config, oidc) {
   const limits = {
     mutation: rateLimiter(config.rateLimits?.mutation ?? { capacity: 30, perMinute: 30 }),
     sensitive: rateLimiter(config.rateLimits?.sensitive ?? { capacity: 5, perMinute: 10 }),
+    // AI agents call tools in quick bursts.
+    mcp: rateLimiter(config.rateLimits?.mcp ?? { capacity: 120, perMinute: 120 }),
+    webhook: rateLimiter({ capacity: 60, perMinute: 60 }),
   }
   const assets = new Map([
     ['/', ['index.html', 'text/html']],
@@ -299,17 +317,91 @@ export function managementServer(pool, config, oidc) {
             'Set-Cookie': [setCookie('platform', raw), setCookie('login', '', 0)],
           })
         }
-        const subject = await authenticate(pool, request, config)
+        // No OAuth discovery here: MCP clients use an access token in a header.
+        if (path.startsWith('/.well-known/')) return send(response, 404, { error: 'Not found' })
+        const hook = path.match(/^\/hooks\/github\/([^/]+)$/)
+        if (hook && request.method === 'POST') {
+          invariant(limits.webhook.take(hook[1]), 429, 'Too many requests')
+          return send(
+            response,
+            202,
+            await handleWebhook(
+              pool,
+              config,
+              projectId(hook[1]),
+              request.headers,
+              await rawBody(request, 5 * 1024 * 1024)
+            )
+          )
+        }
+        // Access tokens (CLI scripts, MCP clients) authenticate with a bearer header.
+        // They carry no cookies, so cross-site request checks do not apply to them.
+        const authorization = request.headers.authorization
+        let bearer = null
+        if (typeof authorization === 'string' && /^Bearer /i.test(authorization))
+          bearer = await tokenSubject(pool, authorization.slice(7).trim())
+        else if (path === '/mcp')
+          return send(
+            response,
+            401,
+            { error: 'Send an access token: Authorization: Bearer sbp_...' },
+            { 'WWW-Authenticate': 'Bearer realm="supabase-platform"' }
+          )
+        const subject = bearer ? bearer.subject : await authenticate(pool, request, config)
         if (!['GET', 'HEAD'].includes(request.method)) {
-          verifyOrigin(request, config.origin)
+          if (!bearer) verifyOrigin(request, config.origin)
+          else invariant(!bearer.readOnly || path === '/mcp', 403, 'This access token is read-only')
           invariant(
-            limits.mutation.take(subject) &&
-              (!sensitivePath.test(path) || limits.sensitive.take(subject)),
+            path === '/mcp'
+              ? limits.mcp.take(subject)
+              : limits.mutation.take(subject) &&
+                  (!sensitivePath.test(path) || limits.sensitive.take(subject)),
             429,
             'Too many requests. Wait a minute and try again.'
           )
         }
-        if (path === '/auth/logout' && request.method === 'POST') {
+        if (path === '/mcp') {
+          invariant(request.method === 'POST', 405, 'Use POST for MCP requests')
+          // Browsers must not drive the MCP endpoint from other sites.
+          invariant(
+            !request.headers.origin || request.headers.origin === config.origin,
+            403,
+            'Request origin is not allowed'
+          )
+          const scopeParam =
+            url.searchParams.get('project_id') ?? url.searchParams.get('project_ref')
+          const context = {
+            pool,
+            config,
+            subject,
+            readOnly: bearer.readOnly || ['true', '1'].includes(url.searchParams.get('read_only')),
+            scope: scopeParam ? projectId(scopeParam) : null,
+          }
+          if (context.scope) await projectAccess(pool, subject, context.scope, 'read')
+          const message = await body(request, 2 * 1024 * 1024)
+          const messages = Array.isArray(message) ? message : [message]
+          const replies = []
+          for (const item of messages) {
+            const reply = await handleMcpMessage(item, context)
+            if (reply) replies.push(reply)
+          }
+          if (!replies.length) {
+            response.writeHead(202, { 'Cache-Control': 'no-store' })
+            return response.end()
+          }
+          return send(response, 200, Array.isArray(message) ? replies : replies[0])
+        }
+        if (path === '/api/access-tokens' || path.startsWith('/api/access-tokens/')) {
+          invariant(!bearer, 403, 'Manage access tokens from the dashboard')
+          if (path === '/api/access-tokens' && request.method === 'GET')
+            return send(response, 200, await listAccessTokens(pool, subject))
+          if (path === '/api/access-tokens' && request.method === 'POST')
+            return send(response, 201, await createAccessToken(pool, subject, await body(request)))
+          const tokenMatch = path.match(/^\/api\/access-tokens\/([^/]+)$/)
+          if (tokenMatch && request.method === 'DELETE')
+            return send(response, 200, await revokeAccessToken(pool, subject, tokenMatch[1]))
+        }
+        if (path === '/auth/logout' && request.method === 'POST' && !bearer) {
           await pool.query('DELETE FROM control.sessions WHERE subject=$1', [subject])
           await audit(pool, subject, 'session.revoked')
           return send(response, 200, { ok: true }, { 'Set-Cookie': setCookie('platform', '', 0) })
@@ -318,6 +410,11 @@ export function managementServer(pool, config, oidc) {
           return send(response, 200, {
             subject,
             role: (await roleFor(pool, subject)) ?? 'project-member',
+            local: Boolean(config.local),
+            // Agents outside the browser cannot resolve *.localhost on Windows.
+            mcpUrl: config.local
+              ? `http://127.0.0.1:${config.publicPort}/mcp`
+              : `${config.origin}/mcp`,
           })
         if (path === '/api/projects') {
           if (request.method === 'GET')
@@ -429,7 +526,7 @@ export function managementServer(pool, config, oidc) {
           return
         }
         const match = path.match(
-          /^\/api\/projects\/([^/]+)(?:\/(secrets|operations|backups|domains|studio-ticket|members|insights|stats|schema-snapshots|backup-settings))?$/
+          /^\/api\/projects\/([^/]+)(?:\/(secrets|operations|backups|domains|studio-ticket|members|insights|stats|schema-snapshots|backup-settings|github|github\/webhook-secret|types))?$/
         )
         if (match) {
           const id = projectId(match[1]),
@@ -461,6 +558,38 @@ export function managementServer(pool, config, oidc) {
               200,
               await updateBackupSettings(pool, subject, id, await body(request))
             )
+          if (resource === 'types' && request.method === 'GET') {
+            const schemas = (url.searchParams.get('schemas') ?? 'public').split(',')
+            const { types } = await liveRequest(pool, {
+              subject,
+              project: id,
+              kind: 'types',
+              payload: { schemas },
+            })
+            response.writeHead(200, {
+              'Content-Type': 'text/plain; charset=utf-8',
+              'Content-Disposition': 'attachment; filename="database.types.ts"',
+              'Cache-Control': 'no-store',
+            })
+            return response.end(types)
+          }
+          if (resource === 'github' && request.method === 'GET')
+            return send(response, 200, await githubStatus(pool, config, subject, id))
+          if (resource === 'github' && request.method === 'POST')
+            return send(
+              response,
+              200,
+              await saveGithubLink(pool, config, subject, id, await body(request))
+            )
+          if (resource === 'github' && request.method === 'DELETE')
+            return send(response, 200, await removeGithubLink(pool, subject, id))
+          if (resource === 'github/webhook-secret' && request.method === 'POST') {
+            await transaction(pool, async (db) => {
+              await projectAccess(db, subject, id, 'secrets')
+              await audit(db, subject, 'project.github.webhook_secret.read', id)
+            })
+            return send(response, 200, { secret: webhookSecret(config, id) })
+          }
           if (resource === 'secrets' && request.method === 'POST')
             return send(response, 200, await projectSecrets(pool, config, subject, id))
           if (resource === 'operations' && request.method === 'POST') {

@@ -31,13 +31,18 @@ for (const [name, value] of Object.entries(secrets)) {
 }
 const routes = {
   http: {
-    routers: { management: { rule: `Host(\`manage.${base}\`)`, entryPoints: ['websecure'], service: 'management', tls: { certResolver: 'letsencrypt' }, middlewares: ['management-limit', 'management-body'] } },
+    routers: {
+      management: { rule: `Host(\`manage.${base}\`)`, entryPoints: ['websecure'], service: 'management', tls: { certResolver: 'letsencrypt' }, middlewares: ['management-limit', 'management-body'] },
+      // MCP tool calls (function files) and GitHub webhooks carry larger bodies.
+      'management-tools': { rule: `Host(\`manage.${base}\`) && (Path(\`/mcp\`) || PathPrefix(\`/hooks/\`))`, entryPoints: ['websecure'], service: 'management', tls: { certResolver: 'letsencrypt' }, middlewares: ['management-limit', 'tools-body'] },
+    },
     services: { management: { loadBalancer: { servers: [{ url: 'http://api:3000' }] } } },
     middlewares: {
       'studio-auth': { forwardAuth: { address: 'http://api:3000/internal/studio-auth', trustForwardHeader: false, authRequestHeaders: ['Cookie', 'Origin'] } },
       'studio-headers': { headers: { customResponseHeaders: { 'Referrer-Policy': 'no-referrer' }, frameDeny: true, contentTypeNosniff: true } },
       'management-limit': { rateLimit: { average: 30, burst: 60 } },
       'management-body': { buffering: { maxRequestBodyBytes: 16384 } },
+      'tools-body': { buffering: { maxRequestBodyBytes: 5242880 } },
       'api-limit': { rateLimit: { average: 200, burst: 400 } },
     },
   },

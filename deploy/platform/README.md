@@ -59,6 +59,65 @@ Restoring takes a safety backup, loads the chosen backup into a new database, an
 swaps it in only after it loads completely. The previous database is kept as
 `postgres_before_restore` until the next restore.
 
+### Developer tools: GitHub, Supabase CLI, MCP, and one-click projects
+
+Each project drawer has **GitHub** and **Developer** tabs, and the header has
+**Access tokens**.
+
+**GitHub.** Connect a repository, branch, and folder (default `supabase`). Every
+new commit applies pending migrations from `<folder>/migrations` and deploys Edge
+Functions from `<folder>/functions`:
+
+- Migrations are recorded in `supabase_migrations.schema_migrations`, exactly as
+  `supabase db push` records them, so the CLI and the platform agree on what is
+  applied.
+- Like `db push`, a migration older than the newest applied one is refused, not
+  run out of order.
+- Each migration runs in its own transaction. A failure stops the deployment; the
+  migrations before it stay applied, and the error shows in the deployment history.
+- Function folders replace the deployed ones. Their `deno.json` imports are merged
+  into the shared import map, since the runtime reads one map for every function.
+  `main` is reserved, and `.env` files are never deployed.
+
+The platform checks for pushes every minute with a token (a fine-grained token with
+read access to Contents, stored encrypted), or every 3 minutes without one; GitHub
+allows 60 anonymous requests an hour. Servers with a public address can also add
+the webhook shown in the tab for instant deploys. Locally, GitHub cannot reach your
+machine, so checking is the only option. Set `GITHUB_POLL_SECONDS` on the worker to
+change the interval.
+
+**One-click projects.** **Create project** has an optional **Start from GitHub**
+section. When the project is ready, it deploys the repository and runs `seed.sql`
+once. A README link of the form
+`http://manage.localhost:8090/#new?repo=owner/name&branch=main&dir=supabase` opens
+the form pre-filled; the GitHub tab shows the link for each connected repository.
+
+**Supabase CLI.** The Developer tab lists ready-to-run commands for this project
+(`db push`, `migration list`, `db pull`, `gen types`, `db dump`, `inspect`), with
+your terminal's syntax and, after **Show keys and password**, the database password
+filled in. They use `--db-url` through the project's pooler, which works with every
+CLI version. `supabase link` and `functions deploy` need Supabase's cloud
+Management API; deploy functions with GitHub or MCP instead.
+
+**MCP for AI coding agents.** The platform serves an MCP endpoint, with tools named
+like Supabase's own MCP server: projects, tables, SQL, migrations, types, Edge
+Functions, backups, and GitHub deploys.
+
+- **Address:** locally it is `http://127.0.0.1:8090/mcp`; on Windows, only browsers
+  resolve `*.localhost` names. On servers it is `https://manage.<domain>/mcp`.
+- **Authentication:** create a token under **Access tokens** and send it as
+  `Authorization: Bearer sbp_…`.
+- **Setup:** the Developer tab has ready configuration for Claude Code, Cursor,
+  VS Code, Windsurf, and stdio-only clients.
+- **Limiting a connection:** add `?project_id=<id>` to restrict it to one project,
+  and `&read_only=true` to forbid changes.
+
+Tokens act as their creator with their current role, and removing someone's access
+disables their tokens. Read-only tokens connect to the database as a role that can
+read every table but write nothing. SQL and type generation run in the worker,
+which joins each project's private network. The API still never connects to
+project databases.
+
 ### Switching projects inside Studio
 
 Each project runs its own Studio. To get a cloud-style project switcher in the

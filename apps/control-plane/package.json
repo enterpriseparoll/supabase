@@ -11,7 +11,7 @@
     "worker": "node src/worker.mjs",
     "migrate": "node src/cli.mjs migrate",
     "test": "node --test test/*.test.mjs",
-    "test:integration": "node --test test/*.integration.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs",
     "lint": "node scripts/check.mjs && prettier --check .",
     "format": "prettier --write .",
     "build": "tailwindcss -i public/input.css -o public/styles.css --minify"

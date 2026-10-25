@@ -471,7 +471,13 @@ test('local mode signs in with the generated token over plain HTTP', async () =>
     assert(!setCookie.includes('Secure'))
     const cookie = setCookie.split(';')[0]
     const me = await fetch(`${at}/api/me`, { headers: { Cookie: cookie } })
-    assert.deepEqual(await me.json(), { subject: 'local-admin', role: 'owner' })
+    // Agents outside the browser reach MCP on 127.0.0.1 (Windows can't resolve *.localhost).
+    assert.deepEqual(await me.json(), {
+      subject: 'local-admin',
+      role: 'owner',
+      local: true,
+      mcpUrl: 'http://127.0.0.1:8090/mcp',
+    })
     const created = await fetch(`${at}/api/projects`, {
       method: 'POST',
       headers: {

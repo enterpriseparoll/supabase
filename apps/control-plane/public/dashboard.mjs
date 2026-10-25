@@ -66,6 +66,7 @@ const operationLabels = {
   delete: 'Delete',
   resize: 'Resize',
   inspect: 'Refresh',
+  deploy: 'Deploy',
 }
 async function operation(project, kind, extra = {}) {
   const result = await api(`/api/projects/${project.id}/operations`, {
@@ -169,6 +170,8 @@ const detailTabs = {
   Migrations: renderMigrations,
   Schema: renderSchema,
   Performance: renderPerformance,
+  GitHub: renderGithub,
+  Developer: renderDeveloper,
 }
 let activeTab = 'Overview'
 async function detail(project) {
@@ -622,6 +625,636 @@ async function downloadBackup(project, row) {
   setTimeout(() => URL.revokeObjectURL(link.href), 60000)
 }
 
+// ---- Shared helpers for developer sections ----
+function codeBlock(text = '') {
+  return element(
+    'pre',
+    text,
+    'overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-3 font-mono text-xs'
+  )
+}
+function copyButton(read, label = 'Copy') {
+  return button(label, async () => {
+    try {
+      await navigator.clipboard.writeText(read())
+      notice('Copied to the clipboard.')
+    } catch {
+      notice('Copy failed. Select the text and copy it instead.')
+    }
+  })
+}
+function choice(label, options, value, onChange) {
+  const wrapper = element('label', label, 'block text-sm')
+  const select = document.createElement('select')
+  select.className = 'mt-2'
+  for (const [key, text] of options) select.append(new Option(text, key, false, key === value))
+  select.addEventListener('change', () => onChange(select.value))
+  wrapper.append(select)
+  return wrapper
+}
+function row(...items) {
+  const wrapper = element('div', '', 'flex flex-wrap items-center gap-2')
+  wrapper.append(...items.filter(Boolean))
+  return wrapper
+}
+function remember(key, fallback) {
+  try {
+    return localStorage.getItem(`platform.${key}`) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+function store(key, value) {
+  try {
+    localStorage.setItem(`platform.${key}`, value)
+  } catch {
+    /* preferences are optional */
+  }
+}
+// Keys revealed in this page session only; never stored.
+const revealedKeys = new Map()
+let createdToken = null
+
+// ---- Developer: app settings, Supabase CLI, AI agents ----
+async function renderDeveloper(project, root) {
+  const canReveal = ['owner', 'operator'].includes(project.role)
+  const keys = revealedKeys.get(project.id)
+  // A new button per section: one DOM node can only appear in one place.
+  const reveal = () =>
+    canReveal && !keys
+      ? button('Show keys and password', async () => {
+          revealedKeys.set(
+            project.id,
+            await api(`/api/projects/${project.id}/secrets`, { method: 'POST', body: '{}' })
+          )
+          detail(project)
+        })
+      : null
+
+  const app = section(
+    root,
+    'Connect your app',
+    "Add these to your app's environment file. The anon key is safe in browsers: Row Level Security protects your data."
+  )
+  const env = codeBlock()
+  const framework = remember('framework', 'vite')
+  const renderEnv = (value) => {
+    const prefix = { vite: 'VITE_', next: 'NEXT_PUBLIC_', expo: 'EXPO_PUBLIC_', node: '' }[value]
+    env.textContent = [
+      `${prefix}SUPABASE_URL=${project.apiUrl}`,
+      `${prefix}SUPABASE_ANON_KEY=${keys?.anonKey ?? '<select "Show keys and password">'}`,
+      ...(keys?.publishableKey ? [`${prefix}SUPABASE_PUBLISHABLE_KEY=${keys.publishableKey}`] : []),
+    ].join('\n')
+  }
+  renderEnv(framework)
+  app.append(
+    choice(
+      'Framework',
+      [
+        ['vite', 'Vite (React, Vue, Svelte)'],
+        ['next', 'Next.js'],
+        ['expo', 'Expo / React Native'],
+        ['node', 'Node.js or other'],
+      ],
+      framework,
+      (value) => {
+        store('framework', value)
+        renderEnv(value)
+      }
+    ),
+    env,
+    row(
+      copyButton(() => env.textContent),
+      reveal()
+    )
+  )
+  if (canReveal && !keys)
+    app.append(element('p', 'Showing keys is recorded in the audit log.', 'text-xs text-subtle'))
+
+  if (project.databaseUrl) {
+    const cli = section(
+      root,
+      'Supabase CLI',
+      'Run these in your app folder (the one containing supabase/migrations). They connect through this project\'s pooler, so they work with any CLI version. Commands marked "Docker" need Docker Desktop running.'
+    )
+    const shell = remember('shell', navigator.userAgent.includes('Windows') ? 'powershell' : 'bash')
+    const list = element('div', '', 'space-y-3')
+    const renderCli = (value) => {
+      const url = keys
+        ? project.databaseUrl.replace('[YOUR-PASSWORD]', encodeURIComponent(keys.databasePassword))
+        : project.databaseUrl
+      const variable = value === 'powershell' ? '$env:DB_URL' : '$DB_URL'
+      const commands = [
+        [
+          'Point the CLI at this project (once per terminal)',
+          value === 'powershell' ? `$env:DB_URL = "${url}"` : `export DB_URL="${url}"`,
+        ],
+        ['See which migrations are applied', `supabase migration list --db-url "${variable}"`],
+        [
+          'Apply new migrations from supabase/migrations',
+          `supabase db push --db-url "${variable}"`,
+        ],
+        [
+          'Apply migrations and seed.sql (new project)',
+          `supabase db push --include-seed --db-url "${variable}"`,
+        ],
+        [
+          'Turn changes made in Studio into a migration (Docker)',
+          `supabase db pull --db-url "${variable}"`,
+        ],
+        [
+          'Generate TypeScript types (Docker)',
+          `supabase gen types typescript --db-url "${variable}" > src/types/database.types.ts`,
+        ],
+        ['Export the schema', `supabase db dump --db-url "${variable}" -f supabase/schema.sql`],
+        ['Find slow queries', `supabase inspect db outliers --db-url "${variable}"`],
+      ]
+      list.replaceChildren()
+      for (const [title, text] of commands) {
+        const item = element('div', '', 'space-y-1')
+        const code = codeBlock(text)
+        code.classList.add('flex-1')
+        const line = element('div', '', 'flex items-start gap-2')
+        line.append(
+          code,
+          copyButton(() => code.textContent)
+        )
+        item.append(element('p', title, 'text-sm'), line)
+        list.append(item)
+      }
+    }
+    renderCli(shell)
+    cli.append(
+      choice(
+        'Terminal',
+        [
+          ['powershell', 'PowerShell (Windows)'],
+          ['bash', 'Bash or Zsh (macOS, Linux, WSL, Git Bash)'],
+        ],
+        shell,
+        (value) => {
+          store('shell', value)
+          renderCli(value)
+        }
+      ),
+      list,
+      row(
+        reveal(),
+        button('Download TypeScript types', async () => {
+          const response = await fetch(`/api/projects/${project.id}/types`, {
+            credentials: 'same-origin',
+          })
+          if (!response.ok)
+            throw new Error((await response.json()).error ?? 'Type generation failed')
+          const link = document.createElement('a')
+          link.href = URL.createObjectURL(await response.blob())
+          link.download = 'database.types.ts'
+          link.click()
+          setTimeout(() => URL.revokeObjectURL(link.href), 60000)
+        })
+      ),
+      element(
+        'p',
+        "Edge Functions: supabase functions deploy needs Supabase's cloud API. Deploy them from GitHub (GitHub tab) or with an AI agent (below).",
+        'text-sm text-subtle'
+      )
+    )
+  }
+
+  const agents = section(
+    root,
+    'AI coding agents (MCP)',
+    'Connect Claude Code, Cursor, VS Code, Windsurf, or any MCP client. Agents can list tables, run SQL, apply migrations, generate types, and deploy Edge Functions in this project.'
+  )
+  const client = remember('mcpClient', 'claude')
+  const readOnlyBox = document.createElement('input')
+  readOnlyBox.type = 'checkbox'
+  readOnlyBox.checked = remember('mcpReadOnly', 'false') === 'true'
+  const config = codeBlock()
+  const hint = element('p', '', 'text-sm text-subtle')
+  const renderAgent = (value) => {
+    const url = `${me.mcpUrl}?project_id=${project.id}${readOnlyBox.checked ? '&read_only=true' : ''}`
+    const token = createdToken ?? '<your-access-token>'
+    const name = `supabase-${
+      project.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || project.id
+    }`
+    const header = { Authorization: `Bearer ${token}` }
+    const snippets = {
+      claude: [
+        `claude mcp add --transport http ${name} "${url}" --header "Authorization: Bearer ${token}"`,
+        'Run in your app folder. Add --scope project to share it with your team (without the token, via an environment variable).',
+      ],
+      cursor: [
+        JSON.stringify({ mcpServers: { [name]: { url, headers: header } } }, null, 2),
+        'Save as .cursor/mcp.json in your app folder, then enable the server in Cursor Settings → MCP.',
+      ],
+      vscode: [
+        JSON.stringify(
+          {
+            servers: {
+              [name]: {
+                type: 'http',
+                url,
+                headers: { Authorization: 'Bearer ${input:platform-token}' },
+              },
+            },
+            inputs: [
+              {
+                type: 'promptString',
+                id: 'platform-token',
+                description: 'Supabase platform access token',
+                password: true,
+              },
+            ],
+          },
+          null,
+          2
+        ),
+        'Save as .vscode/mcp.json. VS Code asks for the token once and stores it securely.',
+      ],
+      windsurf: [
+        JSON.stringify({ mcpServers: { [name]: { serverUrl: url, headers: header } } }, null, 2),
+        'Add to ~/.codeium/windsurf/mcp_config.json.',
+      ],
+      other: [
+        JSON.stringify(
+          {
+            mcpServers: {
+              [name]: {
+                command: 'npx',
+                args: ['-y', 'mcp-remote', url, '--header', `Authorization: Bearer ${token}`],
+              },
+            },
+          },
+          null,
+          2
+        ),
+        'For clients that only start local (stdio) servers, such as Claude Desktop: this bridges to the platform with mcp-remote.',
+      ],
+    }
+    const [text, help] = snippets[value]
+    config.textContent = text
+    hint.textContent = help
+  }
+  const clientChoice = choice(
+    'Client',
+    [
+      ['claude', 'Claude Code'],
+      ['cursor', 'Cursor'],
+      ['vscode', 'VS Code (Copilot)'],
+      ['windsurf', 'Windsurf'],
+      ['other', 'Claude Desktop or other (stdio)'],
+    ],
+    client,
+    (value) => {
+      store('mcpClient', value)
+      renderAgent(value)
+    }
+  )
+  readOnlyBox.addEventListener('change', () => {
+    store('mcpReadOnly', String(readOnlyBox.checked))
+    renderAgent(clientChoice.querySelector('select').value)
+  })
+  const readOnlyLabel = element('label', '', 'flex items-center gap-2 text-sm')
+  readOnlyLabel.append(
+    readOnlyBox,
+    document.createTextNode('Read-only (agents can query but not change anything)')
+  )
+  renderAgent(client)
+  agents.append(
+    clientChoice,
+    readOnlyLabel,
+    config,
+    hint,
+    row(
+      copyButton(() => config.textContent),
+      createdToken ? null : button('Create an access token', () => openTokens())
+    ),
+    element(
+      'p',
+      createdToken
+        ? 'Your new token is filled in above. It is shown only in this browser tab, so copy the configuration now.'
+        : 'Replace <your-access-token> with a token from Access tokens. Agents act as you; read-only tokens can never change anything.',
+      'text-xs text-subtle'
+    )
+  )
+}
+
+// ---- GitHub ----
+async function renderGithub(project, root) {
+  const status = await api(`/api/projects/${project.id}/github`)
+  if (selected !== project.id) return
+  const canOperate = ['owner', 'operator'].includes(project.role)
+  const link = status.link
+  if (!link || renderGithub.editing === project.id) {
+    const wrapper = section(
+      root,
+      link ? 'Edit GitHub connection' : 'Connect a GitHub repository',
+      'Each push to the branch applies new migrations from <folder>/migrations (recorded like supabase db push) and deploys Edge Functions from <folder>/functions.'
+    )
+    if (!canOperate) {
+      wrapper.append(element('p', 'Owners and operators can connect a repository.', 'text-sm'))
+      return
+    }
+    wrapper.append(githubForm(project, link))
+    return
+  }
+  const summary = section(root, 'Connected repository')
+  const repoLink = element('a', link.repository, 'underline')
+  repoLink.href = `https://github.com/${link.repository}/tree/${encodeURIComponent(link.branch)}${link.directory ? `/${link.directory}` : ''}`
+  repoLink.target = '_blank'
+  repoLink.rel = 'noreferrer'
+  const facts = element('div', '', 'space-y-1 text-sm')
+  facts.append(row(element('span', 'Repository:'), repoLink))
+  for (const line of [
+    `Branch: ${link.branch}`,
+    `Folder: ${link.directory || '(repository root)'}`,
+    `Automatic deploys: ${link.autoDeploy ? `on, checked every ${link.hasToken ? 'minute' : '3 minutes (add a token to check every minute)'}` : 'off'}`,
+    `Token: ${link.hasToken ? 'saved (encrypted)' : 'none (public repository)'}`,
+    `Last checked: ${link.checkedAt ? formatTime(link.checkedAt) : 'not yet'}`,
+  ])
+    facts.append(element('p', line))
+  if (link.checkError) facts.append(element('p', `GitHub: ${link.checkError}`, 'font-semibold'))
+  summary.append(facts)
+  if (canOperate)
+    summary.append(
+      row(
+        button('Deploy now', () => operation(project, 'deploy')),
+        button('Edit', () => {
+          renderGithub.editing = project.id
+          detail(project)
+        }),
+        button('Disconnect', async () => {
+          await api(`/api/projects/${project.id}/github`, { method: 'DELETE', body: '{}' })
+          notice('Repository disconnected. Deployed migrations and functions stay in place.')
+          detail(project)
+        })
+      )
+    )
+
+  const history = section(root, 'Deployments')
+  if (!status.deployments.length)
+    history.append(
+      element(
+        'p',
+        link.autoDeploy
+          ? 'The first deployment starts after the next check.'
+          : 'No deployments yet. Select Deploy now.',
+        'text-sm text-subtle'
+      )
+    )
+  else
+    history.append(
+      table(
+        ['Started', 'Commit', 'Trigger', 'Result'],
+        status.deployments.map((item) => {
+          const commit = item.commit_sha
+            ? Object.assign(element('a', item.commit_sha.slice(0, 7), 'font-mono underline'), {
+                href: `https://github.com/${item.repository}/commit/${item.commit_sha}`,
+                target: '_blank',
+                rel: 'noreferrer',
+              })
+            : '—'
+          const result = element('div', '', 'space-y-1')
+          result.append(
+            element(
+              'p',
+              item.state === 'succeeded'
+                ? `Deployed: ${item.migrations.length} migration${item.migrations.length === 1 ? '' : 's'}, ${item.functions.length} function${item.functions.length === 1 ? '' : 's'}`
+                : item.state === 'failed'
+                  ? 'Failed'
+                  : 'Running…',
+              item.state === 'failed' ? 'font-semibold' : ''
+            )
+          )
+          const notes = [
+            ...(item.error ? [item.error] : []),
+            ...(item.migrations.length ? [`Migrations: ${item.migrations.join(', ')}`] : []),
+            ...(item.functions.length ? [`Functions: ${item.functions.join(', ')}`] : []),
+            ...item.warnings,
+          ]
+          if (notes.length) {
+            const more = element('details', '', 'text-xs')
+            more.append(element('summary', 'Details'))
+            for (const note of notes) more.append(element('p', note, 'mt-1 break-words'))
+            result.append(more)
+          }
+          return [
+            formatTime(item.created_at),
+            commit,
+            { push: 'Push', manual: 'Manual', provision: 'New project' }[item.source] ??
+              item.source,
+            result,
+          ]
+        })
+      )
+    )
+
+  const share = section(
+    root,
+    'Deploy link for your README',
+    'Opens Create project with this repository filled in, so anyone on this platform can start a copy in one click.'
+  )
+  const deployLink = `${location.origin}/#new?repo=${encodeURIComponent(link.repository)}&branch=${encodeURIComponent(link.branch)}&dir=${encodeURIComponent(link.directory)}`
+  const markdown = codeBlock(`[Deploy to our Supabase](${deployLink})`)
+  share.append(
+    markdown,
+    copyButton(() => markdown.textContent)
+  )
+
+  if (canOperate && !me.local) {
+    const hook = section(
+      root,
+      'Instant deploys with a webhook',
+      'Optional: GitHub can notify the platform on every push instead of waiting for the next check. In the repository, open Settings → Webhooks → Add webhook, use this URL with content type application/json, and paste the secret.'
+    )
+    const hookUrl = codeBlock(status.webhookUrl)
+    hook.append(
+      hookUrl,
+      row(
+        copyButton(() => hookUrl.textContent, 'Copy URL'),
+        button('Show secret', async () => {
+          const { secret } = await api(`/api/projects/${project.id}/github/webhook-secret`, {
+            method: 'POST',
+            body: '{}',
+          })
+          hook.append(codeBlock(secret))
+        })
+      )
+    )
+  }
+}
+function githubForm(project, link) {
+  const form = element('form', '', 'space-y-4')
+  const input = (label, name, value, attributes = {}) => {
+    const wrapper = element('label', label, 'block text-sm')
+    const field = document.createElement('input')
+    Object.assign(field, { name, value: value ?? '', autocomplete: 'off', ...attributes })
+    field.className = 'mt-2'
+    wrapper.append(field)
+    return wrapper
+  }
+  const grid = element('div', '', 'grid grid-cols-2 gap-4')
+  grid.append(
+    input('Branch', 'branch', link?.branch ?? 'main', { required: true }),
+    input('Supabase folder', 'directory', link?.directory ?? 'supabase')
+  )
+  const auto = element('label', '', 'flex items-center gap-2 text-sm')
+  const autoBox = Object.assign(document.createElement('input'), {
+    type: 'checkbox',
+    name: 'autoDeploy',
+    checked: link?.autoDeploy ?? true,
+  })
+  auto.append(autoBox, document.createTextNode('Deploy automatically on every push'))
+  form.append(
+    input('Repository', 'repository', link?.repository ?? '', {
+      required: true,
+      placeholder: 'owner/name or https://github.com/owner/name',
+    }),
+    grid,
+    input(
+      link?.hasToken
+        ? 'GitHub token (leave empty to keep the saved one)'
+        : 'GitHub token (private repositories)',
+      'token',
+      '',
+      { type: 'password', placeholder: 'github_pat_…' }
+    ),
+    element(
+      'p',
+      'Create a fine-grained token on GitHub (Settings → Developer settings) with read-only access to Contents for this repository. A token also lets the platform check for pushes every minute.',
+      'text-xs text-subtle'
+    ),
+    auto
+  )
+  let clear
+  if (link?.hasToken) {
+    clear = Object.assign(document.createElement('input'), { type: 'checkbox', name: 'clearToken' })
+    const label = element('label', '', 'flex items-center gap-2 text-sm')
+    label.append(clear, document.createTextNode('Remove the saved token'))
+    form.append(label)
+  }
+  const save = element('button', link ? 'Save' : 'Connect repository')
+  save.type = 'submit'
+  form.append(
+    row(
+      save,
+      link
+        ? button('Cancel', () => {
+            renderGithub.editing = null
+            detail(project)
+          })
+        : null
+    )
+  )
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const values = Object.fromEntries(new FormData(form))
+    save.disabled = true
+    try {
+      await api(`/api/projects/${project.id}/github`, {
+        method: 'POST',
+        body: JSON.stringify({
+          repository: values.repository,
+          branch: values.branch,
+          directory: values.directory,
+          autoDeploy: autoBox.checked,
+          ...(values.token ? { token: values.token } : {}),
+          ...(clear?.checked ? { clearToken: true } : {}),
+        }),
+      })
+      renderGithub.editing = null
+      notice(
+        autoBox.checked
+          ? 'Repository connected. The latest commit deploys within a few minutes.'
+          : 'Repository connected. Select Deploy now to deploy.'
+      )
+      detail(project)
+    } catch (error) {
+      notice(error.message)
+    } finally {
+      save.disabled = false
+    }
+  })
+  return form
+}
+
+// ---- Access tokens ----
+async function openTokens() {
+  $('token-created').hidden = true
+  await renderTokens()
+  $('tokens-dialog').showModal()
+}
+async function renderTokens() {
+  const tokens = await api('/api/access-tokens')
+  const list = $('token-list')
+  list.replaceChildren()
+  if (!tokens.length) {
+    list.append(element('p', 'No tokens yet.', 'text-sm text-subtle'))
+    return
+  }
+  list.append(
+    table(
+      ['Name', 'Access', 'Last used', 'Expires', ''],
+      tokens.map((item) => [
+        item.name,
+        item.readOnly ? 'Read-only' : 'Full',
+        item.lastUsedAt ? formatTime(item.lastUsedAt) : 'Never',
+        item.expiresAt ? formatTime(item.expiresAt) : 'Never',
+        button('Revoke', async () => {
+          await api(`/api/access-tokens/${item.id}`, { method: 'DELETE', body: '{}' })
+          notice(`Revoked ${item.name}. Anything using it stops working now.`)
+          await renderTokens()
+        }),
+      ])
+    )
+  )
+}
+$('tokens').addEventListener('click', () => openTokens().catch((error) => notice(error.message)))
+$('token-form').addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const form = event.currentTarget
+  const control = form.querySelector('button[type="submit"]')
+  const values = Object.fromEntries(new FormData(form))
+  control.disabled = true
+  try {
+    const created = await api('/api/access-tokens', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: values.name,
+        readOnly: values.readOnly === 'on',
+        ...(values.expiresInDays ? { expiresInDays: Number(values.expiresInDays) } : {}),
+      }),
+    })
+    createdToken = created.token
+    const box = $('token-created')
+    const code = codeBlock(created.token)
+    box.replaceChildren(
+      element(
+        'p',
+        `Copy “${created.name}” now. You won't be able to see it again.`,
+        'text-sm font-semibold'
+      ),
+      code,
+      copyButton(() => code.textContent)
+    )
+    box.hidden = false
+    form.reset()
+    await renderTokens()
+  } catch (error) {
+    notice(error.message)
+  } finally {
+    control.disabled = false
+  }
+})
+$('tokens-dialog').addEventListener('close', () => {
+  // Show the new token in the open project's MCP settings.
+  if (selected && $('detail-dialog').open && projects.get(selected)) detail(projects.get(selected))
+})
+
 // ---- Migration history ----
 async function renderMigrations(project, root) {
   const insights = await api(`/api/projects/${project.id}/insights`)
@@ -981,12 +1614,23 @@ function submit(formId, action) {
   })
 }
 submit('create-form', async (values) => {
+  const { githubRepository, githubBranch, githubDirectory, githubToken, ...fields } = values
   await api('/api/projects', {
     method: 'POST',
     body: JSON.stringify({
-      ...values,
+      ...fields,
       memoryMb: Number(values.memoryMb),
       cpus: Number(values.cpus),
+      ...(githubRepository.trim()
+        ? {
+            github: {
+              repository: githubRepository,
+              branch: githubBranch,
+              directory: githubDirectory,
+              ...(githubToken ? { token: githubToken } : {}),
+            },
+          }
+        : {}),
     }),
   })
   notice('Project queued for provisioning.')
@@ -1036,11 +1680,22 @@ try {
   $('new-project').hidden = !['owner', 'operator'].includes(me.role)
   $('members').hidden = me.role !== 'owner'
   $('audit').hidden = me.role !== 'owner'
+  $('tokens').hidden = false
   await loadProjects()
-  // Deep links from each project's Studio switcher: #new and #project/<id>.
+  // Deep links: #new and #project/<id> from Studio's switcher, and
+  // #new?repo=owner/name&branch=main&dir=supabase from a README deploy link.
   const [, linked] = location.hash.match(/^#project\/(p[a-f0-9]{24})$/) ?? []
-  if (location.hash === '#new' && !$('new-project').hidden) $('create-dialog').showModal()
-  else if (linked) {
+  if (location.hash.startsWith('#new') && !$('new-project').hidden) {
+    const query = new URLSearchParams(location.hash.split('?')[1] ?? '')
+    const form = $('create-form')
+    if (query.get('repo')) {
+      form.elements.githubRepository.value = query.get('repo')
+      form.elements.name.value = query.get('repo').split('/').pop()
+    }
+    if (query.get('branch')) form.elements.githubBranch.value = query.get('branch')
+    if (query.get('dir') !== null) form.elements.githubDirectory.value = query.get('dir')
+    $('create-dialog').showModal()
+  } else if (linked) {
     try {
       const project = projects.get(linked) ?? (await api(`/api/projects/${linked}`))
       await detail(project)

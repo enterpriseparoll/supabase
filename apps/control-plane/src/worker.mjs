@@ -5,6 +5,9 @@ import { database, audit, roleFor, transaction } from './database.mjs'
 import { authorize, invariant, operationAction, hash } from './core.mjs'
 import { enqueue } from './service.mjs'
 import { Infrastructure } from './infrastructure.mjs'
+import { pollGithub, runDeployment } from './github.mjs'
+import { serveLiveRequests } from './live.mjs'
+import { ProjectDatabase } from './project-db.mjs'
 
 const safeErrorCodes = new Set([
   'COMMAND_FAILED',
@@ -27,7 +30,12 @@ const safeErrorCodes = new Set([
   'MANUAL_RECOVERY_REQUIRED',
   'PROJECT_DELETED',
   'BACKUP_SNAPSHOT_MISSING',
+  'DEPLOYMENT_FAILED',
+  'GITHUB_NOT_LINKED',
+  'PROJECT_PAUSED',
 ])
+// System actors queue work on a project's behalf; their own permissions are not checked.
+const systemOperations = { '@scheduler': ['backup'], '@github': ['deploy'] }
 
 export async function runOne(pool, config, infrastructure) {
   // A session advisory lock is held throughout each operation. Another worker
@@ -77,7 +85,7 @@ export async function runOne(pool, config, infrastructure) {
           409,
           'MANUAL_RECOVERY_REQUIRED'
         )
-        if (!(operation.actor === '@scheduler' && operation.kind === 'backup'))
+        if (!systemOperations[operation.actor]?.includes(operation.kind))
           authorize(
             await roleFor(db, operation.actor, operation.project_id),
             operationAction(operation.kind)
@@ -104,6 +112,14 @@ export async function runOne(pool, config, infrastructure) {
             operation.actor === '@scheduler' ? 'scheduled' : 'manual'
           )
         else if (kind === 'inspect') await recordInspection(db, infrastructure, project)
+        else if (kind === 'deploy')
+          await runDeployment({
+            db,
+            config,
+            projectDb: infrastructure.projectDb ?? new ProjectDatabase(config, infrastructure),
+            project,
+            operation,
+          })
         else if (kind === 'restore')
           await infrastructure.restore(project, operation.payload.backupId)
         else if (kind === 'verify-domain')
@@ -139,6 +155,23 @@ export async function runOne(pool, config, infrastructure) {
           await audit(client, operation.actor, `project.${kind}.succeeded`, project.id, {
             operationId: operation.id,
           })
+          // One-click provisioning: deploy the linked repository, seed included.
+          if (kind === 'create') {
+            const link = (
+              await client.query('SELECT * FROM control.github_links WHERE project_id=$1', [
+                project.id,
+              ])
+            ).rows[0]
+            if (link)
+              await enqueue(client, {
+                actor: '@github',
+                project: project.id,
+                kind: 'deploy',
+                payload: { source: 'provision', seed: true },
+                key: `provision-${project.id}`,
+                requestHash: hash(`provision-${project.id}`),
+              })
+          }
           if (kind === 'delete') {
             await client.query('DELETE FROM control.sessions WHERE project_id=$1', [project.id])
             await client.query('DELETE FROM control.domains WHERE project_id=$1', [project.id])
@@ -320,8 +353,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   )
   const pool = database(config.databaseUrl)
   const infrastructure = new Infrastructure(config, pool)
+  const projectDb = new ProjectDatabase(config, infrastructure)
+  infrastructure.projectDb = projectDb
+  // Interactive requests (SQL, types, functions) run beside the operation queue.
+  const live = serveLiveRequests(pool, {
+    sql: (project, payload, options) => projectDb.sql(project, payload, options),
+    types: (project, payload) => projectDb.types(project, payload),
+    functions: (project, payload) => projectDb.functions(project, payload),
+    'deploy-function': (project, payload) => projectDb.deployFunction(project, payload),
+    migrations: (project) => projectDb.migrations(project),
+    'apply-migration': (project, payload) => projectDb.applyNamedMigration(project, payload),
+  })
   let stopping = false,
-    lastObservation = 0
+    lastObservation = 0,
+    lastGithubPoll = 0
   for (const signal of ['SIGTERM', 'SIGINT'])
     process.on(signal, () => {
       stopping = true
@@ -330,6 +375,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   while (!stopping) {
     try {
       await runOne(pool, config, infrastructure)
+      if (Date.now() - lastGithubPoll > 15000) {
+        await pollGithub(pool, config)
+        lastGithubPoll = Date.now()
+      }
       if (Date.now() - lastObservation > 60000) {
         await observe(pool, infrastructure, config)
         await scheduleBackups(pool)
@@ -343,5 +392,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
     if (!stopping) await new Promise((resolve) => setTimeout(resolve, 2000))
   }
+  await live.stop()
   await pool.end()
 }

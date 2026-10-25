@@ -72,5 +72,6 @@ export async function configuration(env = process.env) {
     insightsMinutes: Number(env.INSIGHTS_INTERVAL_MINUTES ?? 5),
     // The API image runs as the node user; backup downloads are owned by it.
     apiUid,
+    githubPollSeconds: Math.max(15, Number(env.GITHUB_POLL_SECONDS ?? 60) || 60),
   }
 }
