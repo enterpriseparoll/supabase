@@ -1,4 +1,7 @@
 **
+# Newer Docker Compose (Bake) reads the Dockerfile through this filter too.
+!deploy/platform/Dockerfile
+!deploy/platform/Dockerfile.dockerignore
 !apps/
 !apps/control-plane/
 !apps/control-plane/**
