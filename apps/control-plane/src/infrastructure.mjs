@@ -102,6 +102,13 @@ export class Infrastructure {
         !path.replaceAll('\\', '/').endsWith('/db/data') &&
         !path.replaceAll('\\', '/').endsWith('/storage'),
     })
+    // The functions router (main) belongs to the platform: refresh it on every start so
+    // existing projects get fixes. User functions and secrets are never replaced.
+    await cp(
+      `${this.config.templateRoot}/volumes/functions/main`,
+      `${directory}/volumes/functions/main`,
+      { recursive: true, force: true }
+    )
     await mkdir(`${directory}/volumes/storage`, { recursive: true, mode: 0o700 })
     await mkdir(`${directory}/volumes/db/data`, { recursive: true, mode: 0o700 })
     const secrets = unseal(project.encrypted_secrets, this.config.key, project.id)

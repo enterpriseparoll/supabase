@@ -237,6 +237,7 @@ import { Route as ApiPlatformProjectsRefRunLintsRouteImport } from './routes/api
 import { Route as ApiPlatformProjectsRefSettingsRouteImport } from './routes/api/platform/projects/$ref/settings'
 import { Route as ApiPlatformPropsOrgSlugRouteImport } from './routes/api/platform/props/org/$slug'
 import { Route as ApiV1ProjectsRefApiKeysRouteImport } from './routes/api/v1/projects/$ref/api-keys'
+import { Route as ApiV1ProjectsRefSecretsRouteImport } from './routes/api/v1/projects/$ref/secrets'
 import { Route as IntegrationsVercelSlugDeployButtonNewProjectRouteImport } from './routes/integrations/vercel/$slug/deploy-button/new-project'
 import { Route as IntegrationsVercelSlugMarketplaceChooseProjectRouteImport } from './routes/integrations/vercel/$slug/marketplace/choose-project'
 import { Route as ProjectRefAdvisorsRulesPerformanceRouteImport } from './routes/project/$ref/advisors/rules/performance'
@@ -301,6 +302,7 @@ import { Route as ApiPlatformStorageRefVectorBucketsIndexRouteImport } from './r
 import { Route as ApiV1ProjectsRefApiKeysIdRouteImport } from './routes/api/v1/projects/$ref/api-keys/$id'
 import { Route as ApiV1ProjectsRefDatabaseMigrationsRouteImport } from './routes/api/v1/projects/$ref/database/migrations'
 import { Route as ApiV1ProjectsRefFunctionsIndexRouteImport } from './routes/api/v1/projects/$ref/functions/index'
+import { Route as ApiV1ProjectsRefFunctionsDeployRouteImport } from './routes/api/v1/projects/$ref/functions/deploy'
 import { Route as ApiV1ProjectsRefTypesTypescriptRouteImport } from './routes/api/v1/projects/$ref/types/typescript'
 import { Route as ProjectRefIntegrationsIdPageIdIndexRouteImport } from './routes/project/$ref/integrations/$id/$pageId/index'
 import { Route as ProjectRefSettingsInfrastructureReplicaReplicaIdRouteImport } from './routes/project/$ref/settings/infrastructure/replica/$replicaId'
@@ -1569,6 +1571,11 @@ const ApiV1ProjectsRefApiKeysRoute = ApiV1ProjectsRefApiKeysRouteImport.update({
   path: '/api/v1/projects/$ref/api-keys',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1ProjectsRefSecretsRoute = ApiV1ProjectsRefSecretsRouteImport.update({
+  id: '/api/v1/projects/$ref/secrets',
+  path: '/api/v1/projects/$ref/secrets',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IntegrationsVercelSlugDeployButtonNewProjectRoute =
   IntegrationsVercelSlugDeployButtonNewProjectRouteImport.update({
     id: '/$slug/deploy-button/new-project',
@@ -1951,6 +1958,12 @@ const ApiV1ProjectsRefFunctionsIndexRoute =
   ApiV1ProjectsRefFunctionsIndexRouteImport.update({
     id: '/api/v1/projects/$ref/functions/',
     path: '/api/v1/projects/$ref/functions/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiV1ProjectsRefFunctionsDeployRoute =
+  ApiV1ProjectsRefFunctionsDeployRouteImport.update({
+    id: '/api/v1/projects/$ref/functions/deploy',
+    path: '/api/v1/projects/$ref/functions/deploy',
     getParentRoute: () => rootRouteImport,
   } as any)
 const ApiV1ProjectsRefTypesTypescriptRoute =
@@ -2370,6 +2383,7 @@ export interface FileRoutesByFullPath {
   '/api/platform/projects/$ref/settings': typeof ApiPlatformProjectsRefSettingsRoute
   '/api/platform/props/org/$slug': typeof ApiPlatformPropsOrgSlugRoute
   '/api/v1/projects/$ref/api-keys': typeof ApiV1ProjectsRefApiKeysRouteWithChildren
+  '/api/v1/projects/$ref/secrets': typeof ApiV1ProjectsRefSecretsRoute
   '/integrations/vercel/$slug/deploy-button/new-project': typeof IntegrationsVercelSlugDeployButtonNewProjectRoute
   '/integrations/vercel/$slug/marketplace/choose-project': typeof IntegrationsVercelSlugMarketplaceChooseProjectRoute
   '/project/$ref/advisors/rules/performance': typeof ProjectRefAdvisorsRulesPerformanceRoute
@@ -2429,6 +2443,7 @@ export interface FileRoutesByFullPath {
   '/api/platform/props/project/$ref/api': typeof ApiPlatformPropsProjectRefApiRoute
   '/api/v1/projects/$ref/api-keys/$id': typeof ApiV1ProjectsRefApiKeysIdRoute
   '/api/v1/projects/$ref/database/migrations': typeof ApiV1ProjectsRefDatabaseMigrationsRoute
+  '/api/v1/projects/$ref/functions/deploy': typeof ApiV1ProjectsRefFunctionsDeployRoute
   '/api/v1/projects/$ref/types/typescript': typeof ApiV1ProjectsRefTypesTypescriptRoute
   '/project/$ref/settings/infrastructure/replica/$replicaId': typeof ProjectRefSettingsInfrastructureReplicaReplicaIdRoute
   '/project/$ref/storage/analytics/buckets/$bucketId': typeof ProjectRefStorageAnalyticsBucketsBucketIdRoute
@@ -2679,6 +2694,7 @@ export interface FileRoutesByTo {
   '/api/platform/projects/$ref/settings': typeof ApiPlatformProjectsRefSettingsRoute
   '/api/platform/props/org/$slug': typeof ApiPlatformPropsOrgSlugRoute
   '/api/v1/projects/$ref/api-keys': typeof ApiV1ProjectsRefApiKeysRouteWithChildren
+  '/api/v1/projects/$ref/secrets': typeof ApiV1ProjectsRefSecretsRoute
   '/integrations/vercel/$slug/deploy-button/new-project': typeof IntegrationsVercelSlugDeployButtonNewProjectRoute
   '/integrations/vercel/$slug/marketplace/choose-project': typeof IntegrationsVercelSlugMarketplaceChooseProjectRoute
   '/project/$ref/advisors/rules/performance': typeof ProjectRefAdvisorsRulesPerformanceRoute
@@ -2738,6 +2754,7 @@ export interface FileRoutesByTo {
   '/api/platform/props/project/$ref/api': typeof ApiPlatformPropsProjectRefApiRoute
   '/api/v1/projects/$ref/api-keys/$id': typeof ApiV1ProjectsRefApiKeysIdRoute
   '/api/v1/projects/$ref/database/migrations': typeof ApiV1ProjectsRefDatabaseMigrationsRoute
+  '/api/v1/projects/$ref/functions/deploy': typeof ApiV1ProjectsRefFunctionsDeployRoute
   '/api/v1/projects/$ref/types/typescript': typeof ApiV1ProjectsRefTypesTypescriptRoute
   '/project/$ref/settings/infrastructure/replica/$replicaId': typeof ProjectRefSettingsInfrastructureReplicaReplicaIdRoute
   '/project/$ref/storage/analytics/buckets/$bucketId': typeof ProjectRefStorageAnalyticsBucketsBucketIdRoute
@@ -3006,6 +3023,7 @@ export interface FileRoutesById {
   '/api/platform/projects/$ref/settings': typeof ApiPlatformProjectsRefSettingsRoute
   '/api/platform/props/org/$slug': typeof ApiPlatformPropsOrgSlugRoute
   '/api/v1/projects/$ref/api-keys': typeof ApiV1ProjectsRefApiKeysRouteWithChildren
+  '/api/v1/projects/$ref/secrets': typeof ApiV1ProjectsRefSecretsRoute
   '/integrations/vercel/$slug/deploy-button/new-project': typeof IntegrationsVercelSlugDeployButtonNewProjectRoute
   '/integrations/vercel/$slug/marketplace/choose-project': typeof IntegrationsVercelSlugMarketplaceChooseProjectRoute
   '/project/$ref/advisors/rules/performance': typeof ProjectRefAdvisorsRulesPerformanceRoute
@@ -3065,6 +3083,7 @@ export interface FileRoutesById {
   '/api/platform/props/project/$ref/api': typeof ApiPlatformPropsProjectRefApiRoute
   '/api/v1/projects/$ref/api-keys/$id': typeof ApiV1ProjectsRefApiKeysIdRoute
   '/api/v1/projects/$ref/database/migrations': typeof ApiV1ProjectsRefDatabaseMigrationsRoute
+  '/api/v1/projects/$ref/functions/deploy': typeof ApiV1ProjectsRefFunctionsDeployRoute
   '/api/v1/projects/$ref/types/typescript': typeof ApiV1ProjectsRefTypesTypescriptRoute
   '/project/$ref/settings/infrastructure/replica/$replicaId': typeof ProjectRefSettingsInfrastructureReplicaReplicaIdRoute
   '/project/$ref/storage/analytics/buckets/$bucketId': typeof ProjectRefStorageAnalyticsBucketsBucketIdRoute
@@ -3332,6 +3351,7 @@ export interface FileRouteTypes {
     | '/api/platform/projects/$ref/settings'
     | '/api/platform/props/org/$slug'
     | '/api/v1/projects/$ref/api-keys'
+    | '/api/v1/projects/$ref/secrets'
     | '/integrations/vercel/$slug/deploy-button/new-project'
     | '/integrations/vercel/$slug/marketplace/choose-project'
     | '/project/$ref/advisors/rules/performance'
@@ -3391,6 +3411,7 @@ export interface FileRouteTypes {
     | '/api/platform/props/project/$ref/api'
     | '/api/v1/projects/$ref/api-keys/$id'
     | '/api/v1/projects/$ref/database/migrations'
+    | '/api/v1/projects/$ref/functions/deploy'
     | '/api/v1/projects/$ref/types/typescript'
     | '/project/$ref/settings/infrastructure/replica/$replicaId'
     | '/project/$ref/storage/analytics/buckets/$bucketId'
@@ -3641,6 +3662,7 @@ export interface FileRouteTypes {
     | '/api/platform/projects/$ref/settings'
     | '/api/platform/props/org/$slug'
     | '/api/v1/projects/$ref/api-keys'
+    | '/api/v1/projects/$ref/secrets'
     | '/integrations/vercel/$slug/deploy-button/new-project'
     | '/integrations/vercel/$slug/marketplace/choose-project'
     | '/project/$ref/advisors/rules/performance'
@@ -3700,6 +3722,7 @@ export interface FileRouteTypes {
     | '/api/platform/props/project/$ref/api'
     | '/api/v1/projects/$ref/api-keys/$id'
     | '/api/v1/projects/$ref/database/migrations'
+    | '/api/v1/projects/$ref/functions/deploy'
     | '/api/v1/projects/$ref/types/typescript'
     | '/project/$ref/settings/infrastructure/replica/$replicaId'
     | '/project/$ref/storage/analytics/buckets/$bucketId'
@@ -3967,6 +3990,7 @@ export interface FileRouteTypes {
     | '/api/platform/projects/$ref/settings'
     | '/api/platform/props/org/$slug'
     | '/api/v1/projects/$ref/api-keys'
+    | '/api/v1/projects/$ref/secrets'
     | '/integrations/vercel/$slug/deploy-button/new-project'
     | '/integrations/vercel/$slug/marketplace/choose-project'
     | '/project/$ref/advisors/rules/performance'
@@ -4026,6 +4050,7 @@ export interface FileRouteTypes {
     | '/api/platform/props/project/$ref/api'
     | '/api/v1/projects/$ref/api-keys/$id'
     | '/api/v1/projects/$ref/database/migrations'
+    | '/api/v1/projects/$ref/functions/deploy'
     | '/api/v1/projects/$ref/types/typescript'
     | '/project/$ref/settings/infrastructure/replica/$replicaId'
     | '/project/$ref/storage/analytics/buckets/$bucketId'
@@ -4147,6 +4172,7 @@ export interface RootRouteChildren {
   ApiPlatformProjectsRefSettingsRoute: typeof ApiPlatformProjectsRefSettingsRoute
   ApiPlatformPropsOrgSlugRoute: typeof ApiPlatformPropsOrgSlugRoute
   ApiV1ProjectsRefApiKeysRoute: typeof ApiV1ProjectsRefApiKeysRouteWithChildren
+  ApiV1ProjectsRefSecretsRoute: typeof ApiV1ProjectsRefSecretsRoute
   ApiPlatformProjectsRefIndexRoute: typeof ApiPlatformProjectsRefIndexRoute
   ApiPlatformOrganizationsSlugBillingSubscriptionRoute: typeof ApiPlatformOrganizationsSlugBillingSubscriptionRoute
   ApiPlatformProjectsRefAnalyticsLogDrainsRoute: typeof ApiPlatformProjectsRefAnalyticsLogDrainsRouteWithChildren
@@ -4158,6 +4184,7 @@ export interface RootRouteChildren {
   ApiPlatformProjectsRefContentCountRoute: typeof ApiPlatformProjectsRefContentCountRoute
   ApiPlatformPropsProjectRefApiRoute: typeof ApiPlatformPropsProjectRefApiRoute
   ApiV1ProjectsRefDatabaseMigrationsRoute: typeof ApiV1ProjectsRefDatabaseMigrationsRoute
+  ApiV1ProjectsRefFunctionsDeployRoute: typeof ApiV1ProjectsRefFunctionsDeployRoute
   ApiV1ProjectsRefTypesTypescriptRoute: typeof ApiV1ProjectsRefTypesTypescriptRoute
   ApiPlatformAuthRefUsersIndexRoute: typeof ApiPlatformAuthRefUsersIndexRoute
   ApiPlatformPgMetaRefQueryIndexRoute: typeof ApiPlatformPgMetaRefQueryIndexRoute
@@ -5791,6 +5818,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1ProjectsRefApiKeysRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/projects/$ref/secrets': {
+      id: '/api/v1/projects/$ref/secrets'
+      path: '/api/v1/projects/$ref/secrets'
+      fullPath: '/api/v1/projects/$ref/secrets'
+      preLoaderRoute: typeof ApiV1ProjectsRefSecretsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/integrations/vercel/$slug/deploy-button/new-project': {
       id: '/integrations/vercel/$slug/deploy-button/new-project'
       path: '/$slug/deploy-button/new-project'
@@ -6237,6 +6271,13 @@ declare module '@tanstack/react-router' {
       path: '/api/v1/projects/$ref/functions'
       fullPath: '/api/v1/projects/$ref/functions/'
       preLoaderRoute: typeof ApiV1ProjectsRefFunctionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/projects/$ref/functions/deploy': {
+      id: '/api/v1/projects/$ref/functions/deploy'
+      path: '/api/v1/projects/$ref/functions/deploy'
+      fullPath: '/api/v1/projects/$ref/functions/deploy'
+      preLoaderRoute: typeof ApiV1ProjectsRefFunctionsDeployRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/v1/projects/$ref/types/typescript': {
@@ -7290,6 +7331,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPlatformProjectsRefSettingsRoute: ApiPlatformProjectsRefSettingsRoute,
   ApiPlatformPropsOrgSlugRoute: ApiPlatformPropsOrgSlugRoute,
   ApiV1ProjectsRefApiKeysRoute: ApiV1ProjectsRefApiKeysRouteWithChildren,
+  ApiV1ProjectsRefSecretsRoute: ApiV1ProjectsRefSecretsRoute,
   ApiPlatformProjectsRefIndexRoute: ApiPlatformProjectsRefIndexRoute,
   ApiPlatformOrganizationsSlugBillingSubscriptionRoute:
     ApiPlatformOrganizationsSlugBillingSubscriptionRoute,
@@ -7308,6 +7350,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPlatformPropsProjectRefApiRoute: ApiPlatformPropsProjectRefApiRoute,
   ApiV1ProjectsRefDatabaseMigrationsRoute:
     ApiV1ProjectsRefDatabaseMigrationsRoute,
+  ApiV1ProjectsRefFunctionsDeployRoute: ApiV1ProjectsRefFunctionsDeployRoute,
   ApiV1ProjectsRefTypesTypescriptRoute: ApiV1ProjectsRefTypesTypescriptRoute,
   ApiPlatformAuthRefUsersIndexRoute: ApiPlatformAuthRefUsersIndexRoute,
   ApiPlatformPgMetaRefQueryIndexRoute: ApiPlatformPgMetaRefQueryIndexRoute,

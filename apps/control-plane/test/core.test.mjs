@@ -705,3 +705,16 @@ test('usage parses Docker sizes and sums container statistics', async () => {
   )
   assert.deepEqual(containerUsage(undefined), { memoryUsedBytes: null, cpuPercent: null })
 })
+
+test('Studio can write the functions folder; the runtime mount is unchanged', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { renderCompose } = await import('../src/templates.mjs')
+  const compose = parse(
+    renderCompose(
+      await readFile(new URL('../../../docker/docker-compose.yml', import.meta.url), 'utf8'),
+      { id: 'p0123456789abcdef01234567', memory_mb: 4096, cpus: 2, release: 'test' }
+    )
+  )
+  assert(compose.services.studio.volumes.includes('./volumes/functions:/app/edge-functions:z'))
+  assert(compose.services.functions.volumes.includes('./volumes/functions:/home/deno/functions:z'))
+})

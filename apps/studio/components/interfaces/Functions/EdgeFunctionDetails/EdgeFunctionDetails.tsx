@@ -41,6 +41,7 @@ import z from 'zod'
 import CommandRender from '../CommandRender'
 import { INVOCATION_TABS } from './EdgeFunctionDetails.constants'
 import { generateCLICommands } from './EdgeFunctionDetails.utils'
+import { useCanManageEdgeFunctions } from '@/components/interfaces/EdgeFunctions/useCanManageEdgeFunctions'
 import { useAPIKeys } from '@/data/api-keys/api-keys-query'
 import { useProjectApiUrl } from '@/data/config/project-endpoint-query'
 import { useEdgeFunctionQuery } from '@/data/edge-functions/edge-function-query'
@@ -75,6 +76,9 @@ export const EdgeFunctionDetails = () => {
   )
 
   const canUpdateEdgeFunction = IS_PLATFORM && canUpdateEdgeFunctionPermission
+  // Self-hosted Studio can delete (but not rename or reconfigure) functions.
+  const { canManageFunctions } = useCanManageEdgeFunctions()
+  const canDeleteEdgeFunction = canManageFunctions && canUpdateEdgeFunctionPermission
 
   const { can: canReadAPIKeys } = useAsyncCheckPermissionsV2(
     FGA_PERMISSIONS.PROJECT.API_GATEWAY_KEYS_READ
@@ -301,37 +305,39 @@ export const EdgeFunctionDetails = () => {
       </PageSection>
 
       {IS_PLATFORM && (
-        <>
-          <PageSection>
-            <PageSectionMeta>
-              <PageSectionSummary>
-                <PageSectionTitle>Develop locally</PageSectionTitle>
-              </PageSectionSummary>
-            </PageSectionMeta>
-            <PageSectionContent>
-              <div className="rounded-sm border bg-surface-100 px-6 py-4 drop-shadow-xs">
-                <div className="space-y-6">
-                  <CommandRender
-                    commands={[
-                      {
-                        command: `supabase functions download ${selectedFunction?.slug}`,
-                        description: 'Download the function to your local machine',
-                        jsx: () => (
-                          <>
-                            <span className="text-primary">supabase</span> functions download{' '}
-                            {selectedFunction?.slug}
-                          </>
-                        ),
-                        comment: '1. Download the function',
-                      },
-                    ]}
-                  />
-                  <CommandRender commands={[managementCommands[0]]} />
-                  <CommandRender commands={[managementCommands[1]]} />
-                </div>
+        <PageSection>
+          <PageSectionMeta>
+            <PageSectionSummary>
+              <PageSectionTitle>Develop locally</PageSectionTitle>
+            </PageSectionSummary>
+          </PageSectionMeta>
+          <PageSectionContent>
+            <div className="rounded-sm border bg-surface-100 px-6 py-4 drop-shadow-xs">
+              <div className="space-y-6">
+                <CommandRender
+                  commands={[
+                    {
+                      command: `supabase functions download ${selectedFunction?.slug}`,
+                      description: 'Download the function to your local machine',
+                      jsx: () => (
+                        <>
+                          <span className="text-primary">supabase</span> functions download{' '}
+                          {selectedFunction?.slug}
+                        </>
+                      ),
+                      comment: '1. Download the function',
+                    },
+                  ]}
+                />
+                <CommandRender commands={[managementCommands[0]]} />
+                <CommandRender commands={[managementCommands[1]]} />
               </div>
-            </PageSectionContent>
-          </PageSection>
+            </div>
+          </PageSectionContent>
+        </PageSection>
+      )}
+      {canManageFunctions && (
+        <>
           <PageSection>
             <PageSectionMeta>
               <PageSectionSummary>
@@ -348,7 +354,7 @@ export const EdgeFunctionDetails = () => {
                 <AlertDescription className="mt-3">
                   <Button
                     variant="danger"
-                    disabled={!canUpdateEdgeFunction}
+                    disabled={!canDeleteEdgeFunction}
                     loading={selectedFunction?.id === undefined}
                     onClick={() => setShowDeleteModal(true)}
                   >

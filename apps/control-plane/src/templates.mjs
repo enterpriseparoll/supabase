@@ -49,6 +49,13 @@ export function renderCompose(source, project, { local = false } = {}) {
     ingress: { name: `${name}-ingress`, internal: true },
     egress: { name: `${name}-egress` },
   }
+  // Studio deploys Edge Functions and manages their secrets by writing to the
+  // functions folder, so its mount is writable (the template mounts it read-only).
+  compose.services.studio.volumes = (compose.services.studio.volumes ?? []).map((volume) =>
+    typeof volume === 'string' && volume.includes(':/app/edge-functions:')
+      ? volume.replace(/:ro,/, ':').replace(/:ro$/, '')
+      : volume
+  )
   // Studio shows the tenant user and, locally, the published pooler in Connect.
   Object.assign(compose.services.studio.environment, {
     POOLER_TENANT_ID: '${POOLER_TENANT_ID}',

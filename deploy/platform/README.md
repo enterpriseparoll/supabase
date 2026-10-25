@@ -88,6 +88,22 @@ the webhook shown in the tab for instant deploys. Locally, GitHub cannot reach y
 machine, so checking is the only option. Set `GITHUB_POLL_SECONDS` on the worker to
 change the interval.
 
+**Edge Functions in Studio.** With the platform Studio image, each project's Studio
+can manage functions like Supabase Cloud:
+
+- **Deploy a new function** opens the browser editor. You can also edit and redeploy
+  existing functions from their **Code** tab, and delete them from **Settings**.
+- **Secrets** stores custom environment variables for every function. Names cannot
+  start with `SUPABASE_`; Studio shows only a digest of each value.
+- **When changes apply:** deploys and secret changes take effect on the next request.
+  The platform's function router starts a fresh worker when a function's folder or
+  the secrets change.
+
+Functions are written to the project's `volumes/functions` folder, the same place
+GitHub deploys and MCP use, and secrets are stored in `volumes/functions/.secrets.json`.
+Restart existing projects once after updating so Studio gets write access and the
+router picks up secrets.
+
 **One-click projects.** **Create project** has an optional **Start from GitHub**
 section. When the project is ready, it deploys the repository and runs `seed.sql`
 once. A README link of the form

@@ -1,4 +1,4 @@
-import { IS_PLATFORM, useParams } from 'common'
+import { useParams } from 'common'
 import { isEqual } from 'lodash'
 import { AlertCircleIcon, CornerDownLeftIcon, Loader2Icon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -10,6 +10,7 @@ import {
   formatFunctionBodyToFiles,
   getDefaultSelectedFileId,
 } from '@/components/interfaces/EdgeFunctions/EdgeFunctions.utils'
+import { useCanManageEdgeFunctions } from '@/components/interfaces/EdgeFunctions/useCanManageEdgeFunctions'
 import { DefaultLayout } from '@/components/layouts/DefaultLayout'
 import EdgeFunctionDetailsLayout from '@/components/layouts/EdgeFunctionsLayout/EdgeFunctionDetailsLayout'
 import { DiscardChangesConfirmationDialog } from '@/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog'
@@ -34,6 +35,7 @@ const CodePage = () => {
 
   const track = useTrack()
   const [showDeployWarning, setShowDeployWarning] = useState(false)
+  const { canManageFunctions } = useCanManageEdgeFunctions()
 
   const { can: canDeployFunction } = useAsyncCheckPermissionsV2(
     FGA_PERMISSIONS.PROJECT.EDGE_FUNCTIONS_WRITE
@@ -220,7 +222,7 @@ const CodePage = () => {
               orgSlug: org?.slug,
             }}
           />
-          {IS_PLATFORM && (
+          {canManageFunctions && (
             <div className="flex items-center bg-background-muted justify-end p-4 border-t bg-surface-100 shrink-0">
               <ButtonTooltip
                 variant="primary"
