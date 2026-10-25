@@ -187,6 +187,9 @@ export function managementServer(pool, config, oidc) {
           return
         }
         if (config.local && path === '/auth/login' && request.method === 'GET') {
+          // With no-referrer, browsers submit HTML forms with "Origin: null", which the
+          // origin check rightly rejects. same-origin still sends nothing cross-site.
+          response.setHeader('Referrer-Policy', 'same-origin')
           response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
           return response.end(localLoginPage(url.searchParams.has('failed')))
         }

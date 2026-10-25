@@ -443,6 +443,8 @@ test('local mode signs in with the generated token over plain HTTP', async () =>
     const page = await fetch(`${at}/auth/login`)
     assert.equal(page.status, 200)
     assert.match(await page.text(), /Sign-in token/)
+    // Browsers send "Origin: null" for form posts from no-referrer pages.
+    assert.equal(page.headers.get('referrer-policy'), 'same-origin')
     assert.equal((await fetch(`${at}/auth/callback?code=x&state=y`)).status, 401)
     const signIn = (value, origin = localConfig.origin) =>
       fetch(`${at}/auth/local`, {
@@ -456,6 +458,7 @@ test('local mode signs in with the generated token over plain HTTP', async () =>
     assert.equal(wrong.headers.get('location'), '/auth/login?failed')
     assert.equal(wrong.headers.get('set-cookie'), null)
     assert.equal((await signIn('correct-local-token', 'http://evil.localhost')).status, 403)
+    assert.equal((await signIn('correct-local-token', 'null')).status, 403)
     const right = await signIn('correct-local-token')
     assert.equal(right.status, 303)
     const setCookie = right.headers.get('set-cookie')
