@@ -19,11 +19,16 @@ import {
   token,
 } from './core.mjs'
 
+const pendingOperationColumn = `(SELECT json_build_object('id',o.id,'kind',o.kind,'state',o.state,'createdAt',o.created_at)
+  FROM control.operations o WHERE o.project_id=p.id AND o.state IN ('queued','running')
+  ORDER BY o.created_at,o.id LIMIT 1) AS pending_operation`
+
 export const publicProject = (row, config) => ({
   id: row.id,
   name: row.name,
   status: row.status,
   desiredState: row.desired_state,
+  pendingOperation: row.pending_operation ?? null,
   apiUrl: publicUrl(config, `${row.id}.api.${config.baseDomain}`),
   studioUrl: publicUrl(config, `${row.id}.studio.${config.baseDomain}`),
   siteUrl: row.site_url,
@@ -45,10 +50,10 @@ export async function projectAccess(db, subject, id, action, includeDeleted = fa
   projectId(id)
   authorize(await roleFor(db, subject, id), action)
   const project = (
-    await db.query("SELECT * FROM control.projects WHERE id=$1 AND (status<>'deleted' OR $2)", [
-      id,
-      includeDeleted,
-    ])
+    await db.query(
+      `SELECT p.*, ${pendingOperationColumn} FROM control.projects p WHERE p.id=$1 AND (p.status<>'deleted' OR $2)`,
+      [id, includeDeleted]
+    )
   ).rows[0]
   invariant(project, 404, 'Project not found')
   return project
@@ -214,6 +219,15 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
       return prior
     }
     const project = await projectAccess(db, actor, id, operationAction(kind), kind === 'recover')
+    if (['start', 'stop', 'restart'].includes(kind)) {
+      const pending = (
+        await db.query(
+          "SELECT * FROM control.operations WHERE project_id=$1 AND kind=$2 AND state IN ('queued','running') ORDER BY created_at,id LIMIT 1",
+          [id, kind]
+        )
+      ).rows[0]
+      if (pending) return pending
+    }
     if (kind === 'restore')
       invariant(
         (
@@ -287,7 +301,7 @@ export async function listProjects(db, config, actor, cursor = '', limit = 30) {
   invariant(cursor === '' || /^p[a-f0-9]{24}$/.test(cursor), 400, 'Invalid cursor')
   invariant(Number.isInteger(limit) && limit > 0 && limit <= 100, 400, 'Limit must be 1–100')
   const { rows } = await db.query(
-    `SELECT p.*, COALESCE((SELECT role FROM control.members WHERE subject=$1),(SELECT role FROM control.project_members WHERE subject=$1 AND project_id=p.id)) AS effective_role FROM control.projects p WHERE p.status<>'deleted' AND p.id>$2
+    `SELECT p.*, ${pendingOperationColumn}, COALESCE((SELECT role FROM control.members WHERE subject=$1),(SELECT role FROM control.project_members WHERE subject=$1 AND project_id=p.id)) AS effective_role FROM control.projects p WHERE p.status<>'deleted' AND p.id>$2
     AND (EXISTS(SELECT 1 FROM control.members WHERE subject=$1) OR EXISTS(SELECT 1 FROM control.project_members WHERE subject=$1 AND project_id=p.id))
     ORDER BY p.id LIMIT $3`,
     [actor, cursor, limit + 1]

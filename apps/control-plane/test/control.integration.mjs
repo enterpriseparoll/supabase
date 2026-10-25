@@ -206,6 +206,33 @@ test('queued destructive actions recheck revoked permissions', async () => {
   assert.equal(result.state, 'failed')
   assert.equal(result.error_code, 'PERMISSION_REVOKED')
 })
+test('Connect handoffs open the full Studio connection sheet', async () => {
+  const project = (await listProjects(pool, config, 'owner')).projects[0]
+  const response = await fetch(`${base}/api/projects/${project.id}/studio-ticket?connect=true`, {
+    method: 'POST',
+    headers: {
+      Cookie: `__Host-platform=${ownerCookie}`,
+      Origin: config.origin,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  })
+  assert.equal(response.status, 200)
+  const ticketUrl = new URL((await response.json()).url)
+  const handoff = await fetch(`${base}/internal/studio-auth`, {
+    headers: {
+      'X-Forwarded-Host': ticketUrl.hostname,
+      'X-Forwarded-URI': `${ticketUrl.pathname}${ticketUrl.search}`,
+      'X-Forwarded-Method': 'GET',
+    },
+    redirect: 'manual',
+  })
+  assert.equal(handoff.status, 303)
+  assert.equal(
+    handoff.headers.get('location'),
+    `${ticketUrl.origin}/project/default?showConnect=true`
+  )
+})
 test('Studio handoffs are single-use, project-bound, and revoked with membership', async () => {
   const project = (await listProjects(pool, config, 'owner')).projects[0]
   const ticketResponse = await fetch(`${base}/api/projects/${project.id}/studio-ticket`, {
@@ -447,7 +474,12 @@ test('local mode signs in with the generated token over plain HTTP', async () =>
   try {
     const page = await fetch(`${at}/auth/login`)
     assert.equal(page.status, 200)
-    assert.match(await page.text(), /Sign-in token/)
+    const loginHtml = await page.text()
+    assert.match(loginHtml, /Welcome back/)
+    assert.match(loginHtml, /name="token"/)
+    assert.equal((await fetch(`${at}/login.mjs`)).status, 200)
+    const failedLogin = await fetch(`${at}/auth/login?failed`)
+    assert.match(await failedLogin.text(), /role="alert"/)
     // Browsers send "Origin: null" for form posts from no-referrer pages.
     assert.equal(page.headers.get('referrer-policy'), 'same-origin')
     assert.equal((await fetch(`${at}/auth/callback?code=x&state=y`)).status, 401)
@@ -1028,6 +1060,36 @@ test('backup downloads serve the cloud-format dump to permitted users only', asy
     code: 'ENOENT',
   })
 })
+test('lifecycle operations stay visible after reload and duplicate clicks share a job', async () => {
+  const creation = await createProject(pool, config, 'owner', input, randomUUID())
+  const project = { id: creation.project_id }
+  await pool.query("UPDATE control.operations SET state='succeeded' WHERE project_id=$1", [
+    project.id,
+  ])
+  const [first, second] = await Promise.all([
+    requestOperation(pool, config, 'owner', project.id, 'stop', { kind: 'stop' }, randomUUID()),
+    requestOperation(pool, config, 'owner', project.id, 'stop', { kind: 'stop' }, randomUUID()),
+  ])
+  assert.equal(first.id, second.id)
+  const read = async () => {
+    const response = await fetch(`${base}/api/projects/${project.id}`, {
+      headers: { Cookie: `__Host-platform=${ownerCookie}` },
+    })
+    assert.equal(response.status, 200)
+    return response.json()
+  }
+  assert.equal((await read()).pendingOperation.kind, 'stop')
+  assert.equal(
+    (await listProjects(pool, config, 'owner', '', 100)).projects.find((p) => p.id === project.id)
+      ?.pendingOperation.id,
+    first.id
+  )
+  await pool.query("UPDATE control.operations SET state='running' WHERE id=$1", [first.id])
+  assert.equal((await read()).pendingOperation.state, 'running')
+  await pool.query("UPDATE control.operations SET state='succeeded' WHERE id=$1", [first.id])
+  assert.equal((await read()).pendingOperation, null)
+})
+
 test('migration checksums ignore line endings but catch real edits', async () => {
   const { readFile } = await import('node:fs/promises')
   const sql = (

@@ -124,6 +124,21 @@ test('every generated service has isolated names, limits, no host ports, and no 
   assert(cpus <= project.cpus + 0.01)
   assert.deepEqual(Object.keys(compose.services.db.networks), ['private'])
 })
+test('smallest projects leave room for service runtimes within the budget', async () => {
+  const source = await readFile(new URL('docker-compose.yml', root), 'utf8')
+  for (const local of [false, true]) {
+    const compose = parse(renderCompose(source, { ...project, memory_mb: 2048 }, { local }))
+    const memory = (service) => Number(service.mem_limit.replace('m', ''))
+    assert(memory(compose.services.meta) >= 256)
+    assert(memory(compose.services.realtime) >= 256)
+    assert(memory(compose.services.supavisor) >= 256)
+    assert(memory(compose.services.storage) >= 128)
+    assert(memory(compose.services.rest) >= 128)
+    assert(
+      Object.values(compose.services).reduce((sum, service) => sum + memory(service), 0) <= 2048
+    )
+  }
+})
 test('public gateway has no route to Studio, metadata, analytics, or catch-all administration', async () => {
   const source = await readFile(new URL('volumes/api/envoy/lds.template.yaml', root), 'utf8')
   const gateway = parse(publicGateway(source))
@@ -281,7 +296,7 @@ test('health checks get a start-up grace and local mode keeps a CPU floor', asyn
   assert.equal(server.services.storage.healthcheck.start_period, '120s')
   assert(server.services.storage.cpus < 0.5, 'servers keep strict per-project CPU shares')
   for (const service of Object.values(local.services)) assert(service.cpus >= 0.5)
-  assert.equal(local.services.db.cpus, server.services.db.cpus)
+  assert.equal(local.services.db.cpus, Math.max(server.services.db.cpus, 0.5))
 })
 test('local mode publishes each project pooler on its own loopback ports', async () => {
   const source = await readFile(new URL('docker-compose.yml', root), 'utf8')

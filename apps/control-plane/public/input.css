@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @source './index.html';
 @source './dashboard.mjs';
+@source '../src/login-page.mjs';
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
@@ -119,6 +120,9 @@
     overscroll-behavior: contain;
     box-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
   }
+  #detail-dialog {
+    width: min(100vw, 56rem);
+  }
   dialog[open] {
     animation: drawer-in 200ms ease-out;
   }
@@ -149,6 +153,103 @@
   }
 }
 @layer components {
+  .login-layout {
+    @apply grid min-h-dvh lg:grid-cols-2;
+  }
+  .login-main {
+    @apply flex min-h-dvh flex-col px-7 py-8 sm:px-12;
+  }
+  .login-brand {
+    @apply inline-flex items-center gap-2.5 self-start text-2xl font-semibold tracking-tight;
+  }
+  .login-form-wrap {
+    @apply mx-auto my-auto w-full max-w-sm py-16;
+  }
+  .login-eyebrow {
+    @apply inline-flex items-center gap-2 text-[10px] font-medium tracking-[0.16em] text-subtle;
+  }
+  .login-submit {
+    @apply flex h-12 items-center justify-center gap-3 rounded-lg border-brand bg-brand font-medium text-brand-foreground transition-colors hover:bg-brand-strong;
+  }
+  .login-help {
+    @apply mt-6 border-b border-border pb-6;
+  }
+  .login-showcase {
+    @apply relative hidden items-center overflow-hidden border-l border-border bg-linear-to-br from-brand/10 via-surface to-surface p-12 lg:flex xl:p-20;
+  }
+  .login-showcase::before {
+    content: '';
+    @apply pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full border border-brand/10;
+  }
+  .login-showcase-content {
+    @apply relative mx-auto w-full max-w-lg;
+  }
+  .login-showcase-footer {
+    @apply absolute bottom-8 text-[10px] tracking-[0.2em] text-subtle;
+  }
+  .login-stack {
+    @apply mt-10 overflow-hidden rounded-xl border border-border bg-background/80 shadow-xl shadow-background/20;
+  }
+  .login-stack-heading {
+    @apply flex items-center gap-2.5 border-b border-border px-5 py-4 text-sm font-medium;
+  }
+  .login-stack-service {
+    @apply mx-5 flex items-center gap-4 border-b border-border py-5 last:border-0;
+  }
+  .login-stack-service strong {
+    @apply text-sm font-medium;
+  }
+  .login-stack-service p {
+    @apply mt-1 text-xs text-subtle;
+  }
+  .login-service-icon {
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface font-mono text-xs text-subtle;
+  }
+  .operation-progress {
+    @apply space-y-2 rounded-lg border border-brand/25 bg-brand/5 p-4;
+  }
+  .operation-progress-compact {
+    @apply mt-3 w-full space-y-2;
+  }
+  .operation-track {
+    @apply h-1.5 overflow-hidden rounded-full bg-brand/15;
+  }
+  .operation-fill {
+    @apply block h-full w-2/5 rounded-full bg-brand;
+    animation: operation-progress 1.6s ease-in-out infinite;
+  }
+  .operation-spinner {
+    @apply inline-block h-4 w-4 shrink-0 rounded-full border-2 border-brand/25 border-t-brand;
+    animation: operation-spin 900ms linear infinite;
+  }
+  .row-card:has(.operation-progress-compact:not([hidden])) {
+    flex-wrap: wrap;
+  }
+  .row-card .operation-progress-compact {
+    flex-basis: 100%;
+  }
+  @keyframes operation-progress {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(350%);
+    }
+  }
+  @keyframes operation-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .operation-fill {
+      animation: none;
+      @apply w-full opacity-50;
+    }
+    .operation-spinner {
+      animation: none;
+    }
+  }
   .btn-primary {
     align-items: center;
     background: var(--color-brand);

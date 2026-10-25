@@ -7,8 +7,18 @@ export function renderCompose(source, project, { local = false } = {}) {
   const name = projectName(project.id)
   compose.name = name
   const services = Object.entries(compose.services)
-  // Weights reserve the largest shares for PostgreSQL and Studio.
-  const weights = { db: 6, studio: 4, realtime: 2, functions: 2, supavisor: 2 }
+  // Node/Erlang services need room for their runtimes even at the smallest
+  // project size; single shares cause repeated out-of-memory exits.
+  const weights = {
+    db: 5,
+    studio: 4,
+    meta: 4,
+    realtime: 4,
+    functions: 2,
+    supavisor: 4,
+    storage: 2,
+    rest: 2,
+  }
   const total = services.reduce((sum, [key]) => sum + (weights[key] ?? 1), 0)
   for (const [key, service] of services) {
     delete service.container_name

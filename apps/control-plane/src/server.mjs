@@ -4,6 +4,7 @@ import { pipeline } from 'node:stream/promises'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { configuration } from './config.mjs'
+import { localLoginPage } from './login-page.mjs'
 import { database, audit, roleFor, sessionSubject, transaction } from './database.mjs'
 import { authenticate, cookieValue, oidcClient, sessionCookie, verifyOrigin } from './auth.mjs'
 import { createAccessToken, listAccessTokens, revokeAccessToken, tokenSubject } from './tokens.mjs'
@@ -80,30 +81,6 @@ async function formField(request, name) {
   return new URLSearchParams(text).get(name)
 }
 export const LOCAL_ADMIN = 'local-admin'
-const localLoginPage = (failed) => `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sign in · Local project platform</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body class="bg-background text-foreground font-sans antialiased">
-    <main class="mx-auto max-w-md px-6 py-16">
-      <h1 class="text-3xl font-semibold tracking-tight">Sign in</h1>
-      <p class="mt-3 text-subtle">
-        Paste the sign-in token printed by <code>docker compose -f compose.local.yml logs local-init</code>.
-      </p>
-      ${failed ? '<p role="alert" class="my-4 text-sm">That token didn’t match. Copy it again from the logs.</p>' : ''}
-      <form method="post" action="/auth/local" class="mt-6 grid gap-4">
-        <label class="grid gap-2 text-sm">Sign-in token
-          <input name="token" type="password" autocomplete="off" required autofocus />
-        </label>
-        <button type="submit" class="rounded border border-border px-4 py-2">Sign in</button>
-      </form>
-    </main>
-  </body>
-</html>`
 function send(response, status, value, headers = {}) {
   response.writeHead(status, {
     'Content-Type': 'application/json',
@@ -127,18 +104,19 @@ export function managementServer(pool, config, oidc) {
   const assets = new Map([
     ['/', ['index.html', 'text/html']],
     ['/dashboard.mjs', ['dashboard.mjs', 'text/javascript']],
+    ['/login.mjs', ['login.mjs', 'text/javascript']],
     ['/styles.css', ['styles.css', 'text/css']],
   ])
   const studioUrl = (id) => publicUrl(config, `${id}.studio.${config.baseDomain}`)
   // Short-lived, single-use link that signs the subject in to one project's Studio.
-  const studioHandoff = async (subject, id) => {
+  const studioHandoff = async (subject, id, connect = false) => {
     await projectAccess(pool, subject, id, 'studio')
     const ticket = token()
     await pool.query(
       "INSERT INTO control.studio_tickets(token_hash,subject,project_id,expires_at) VALUES($1,$2,$3,now()+interval '30 seconds')",
       [hash(ticket), subject, id]
     )
-    return `${studioUrl(id)}/_platform/session?ticket=${ticket}`
+    return `${studioUrl(id)}/_platform/session?ticket=${ticket}${connect ? '&connect=true' : ''}`
   }
   const cookie = (name) => cookieName(config, name)
   const setCookie = (name, value, age) => sessionCookie(cookie(name), value, age, !config.local)
@@ -203,7 +181,10 @@ export function managementServer(pool, config, oidc) {
             // Absolute: Traefik resolves a relative Location from forward auth against
             // the auth service address (http://api:3000), not the Studio host.
             return send(response, 303, undefined, {
-              Location: `${studioOrigin}/`,
+              Location:
+                forwarded.searchParams.get('connect') === 'true'
+                  ? `${studioOrigin}/project/default?showConnect=true`
+                  : `${studioOrigin}/`,
               'Set-Cookie': setCookie('studio', raw),
             })
           }
@@ -645,7 +626,9 @@ export function managementServer(pool, config, oidc) {
             )
           }
           if (resource === 'studio-ticket' && request.method === 'POST')
-            return send(response, 200, { url: await studioHandoff(subject, id) })
+            return send(response, 200, {
+              url: await studioHandoff(subject, id, url.searchParams.get('connect') === 'true'),
+            })
           if (resource === 'members' && request.method === 'GET') {
             await projectAccess(pool, subject, id, 'members')
             return send(

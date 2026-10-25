@@ -1,5 +1,7 @@
 const $ = (id) => document.getElementById(id)
 const projects = new Map()
+const pendingOperations = new Map()
+const trackedOperations = new Set()
 let me,
   nextCursor = '',
   confirmationAction,
@@ -56,7 +58,8 @@ function button(text, action) {
     } catch (error) {
       notice(error.message)
     } finally {
-      node.disabled = false
+      const controls = node.closest('[data-project-controls]')
+      node.disabled = Boolean(controls && pendingOperations.has(controls.dataset.projectControls))
     }
   })
   return node
@@ -72,20 +75,104 @@ const operationLabels = {
   inspect: 'Refresh',
   deploy: 'Deploy',
 }
+const operationProgressLabels = {
+  create: 'Creating project',
+  start: 'Resuming project',
+  stop: 'Pausing project',
+  restart: 'Restarting project',
+  backup: 'Backing up project',
+  restore: 'Restoring project',
+  delete: 'Deleting project',
+  resize: 'Updating resources',
+  inspect: 'Refreshing status',
+  deploy: 'Deploying project',
+}
+function progressContainer(project, compact = false) {
+  const container = element('div')
+  container.dataset.operationProject = project.id
+  container.dataset.compact = String(compact)
+  container.setAttribute('role', 'status')
+  container.setAttribute('aria-live', 'polite')
+  return container
+}
+function updateOperationUI(projectId) {
+  const pending = pendingOperations.get(projectId)
+  for (const container of document.querySelectorAll('[data-operation-project]')) {
+    if (container.dataset.operationProject !== projectId) continue
+    container.hidden = !pending
+    container.replaceChildren()
+    if (!pending) continue
+    const compact = container.dataset.compact === 'true'
+    container.className = compact ? 'operation-progress-compact' : 'operation-progress'
+    const label = operationProgressLabels[pending.kind] ?? 'Updating project'
+    if (!compact) {
+      const heading = element('div', '', 'flex items-center gap-2 font-medium text-sm')
+      heading.append(element('span', '', 'operation-spinner'), element('span', `${label}…`))
+      container.append(heading)
+    }
+    const description =
+      pending.state === 'submitting'
+        ? 'Sending your request…'
+        : pending.state === 'queued'
+          ? 'Request received. Waiting to start.'
+          : 'This can take a few minutes. You can keep this page open.'
+    container.append(element('p', description, 'text-xs text-subtle'))
+    const bar = element('div', '', 'operation-track')
+    bar.setAttribute('role', 'progressbar')
+    bar.setAttribute('aria-label', label)
+    bar.setAttribute('aria-valuetext', description)
+    bar.append(element('span', '', 'operation-fill'))
+    container.append(bar)
+  }
+  for (const container of document.querySelectorAll('[data-project-controls]')) {
+    if (container.dataset.projectControls !== projectId) continue
+    container.setAttribute('aria-busy', String(Boolean(pending)))
+    for (const control of container.querySelectorAll('button')) {
+      control.disabled = Boolean(pending)
+      if (control.dataset.operationKind) {
+        control.textContent =
+          pending?.kind === control.dataset.operationKind
+            ? `${operationProgressLabels[pending.kind] ?? 'Updating project'}…`
+            : operationLabels[control.dataset.operationKind]
+      }
+    }
+  }
+}
+function rememberProject(project) {
+  projects.set(project.id, project)
+  if (project.pendingOperation && !pendingOperations.has(project.id)) {
+    pendingOperations.set(project.id, project.pendingOperation)
+    void trackOperation(project, project.pendingOperation.id, project.pendingOperation.kind)
+  }
+}
 async function operation(project, kind, extra = {}) {
-  const result = await api(`/api/projects/${project.id}/operations`, {
-    method: 'POST',
-    body: JSON.stringify({ kind, ...extra }),
-  })
-  const label = operationLabels[kind] ?? kind
-  notice(`${label} started. This page updates when it finishes.`)
-  await loadProjects(true)
-  trackOperation(project, result.id, label)
+  if (pendingOperations.has(project.id)) return
+  pendingOperations.set(project.id, { kind, state: 'submitting' })
+  renderProjects()
+  updateOperationUI(project.id)
+  try {
+    const result = await api(`/api/projects/${project.id}/operations`, {
+      method: 'POST',
+      body: JSON.stringify({ kind, ...extra }),
+    })
+    pendingOperations.set(project.id, { id: result.id, kind, state: result.state })
+    updateOperationUI(project.id)
+    void trackOperation(project, result.id, kind)
+    await loadProjects(true).catch(() => {})
+  } catch (error) {
+    pendingOperations.delete(project.id)
+    updateOperationUI(project.id)
+    renderProjects()
+    throw error
+  }
 }
 // Follows a queued operation until it finishes, then reports the result and refreshes
 // the open project so its buttons and status match the new state.
-async function trackOperation(project, id, label) {
-  for (let attempt = 0; attempt < 240; attempt++) {
+async function trackOperation(project, id, kind) {
+  if (trackedOperations.has(id)) return
+  trackedOperations.add(id)
+  const label = operationLabels[kind] ?? kind
+  while (pendingOperations.get(project.id)?.id === id) {
     await new Promise((done) => setTimeout(done, 3000))
     let row
     try {
@@ -93,7 +180,17 @@ async function trackOperation(project, id, label) {
     } catch {
       continue
     }
-    if (!row || ['queued', 'running'].includes(row.state)) continue
+    if (!row) continue
+    if (['queued', 'running'].includes(row.state)) {
+      if (pendingOperations.get(project.id)?.state !== row.state) {
+        pendingOperations.set(project.id, { id, kind, state: row.state })
+        updateOperationUI(project.id)
+      }
+      continue
+    }
+    pendingOperations.delete(project.id)
+    trackedOperations.delete(id)
+    updateOperationUI(project.id)
     notice(
       row.state === 'succeeded'
         ? `${label} finished.`
@@ -123,6 +220,7 @@ function confirm(project, kind, extra = {}) {
 // Changing memory/CPU restarts the project with the new limits. Data is kept.
 function resourcesForm(project) {
   const form = element('form', '', 'space-y-4 rounded border border-border p-4')
+  form.dataset.projectControls = project.id
   form.append(element('h3', 'Resources', 'font-semibold'))
   form.append(
     element(
@@ -180,6 +278,7 @@ const detailTabs = {
 let activeTab = 'Overview'
 async function detail(project) {
   selected = project.id
+  rememberProject(project)
   const root = $('detail')
   root.replaceChildren()
   $('detail-title').textContent = project.name
@@ -199,13 +298,14 @@ async function detail(project) {
     })
     bar.append(tab)
   }
-  root.append(bar, panel)
+  root.append(bar, progressContainer(project), panel)
   if (!$('detail-dialog').open) $('detail-dialog').showModal()
   try {
     await detailTabs[activeTab](project, panel)
   } catch (error) {
     if (selected === project.id) panel.append(element('p', error.message, 'text-sm'))
   }
+  updateOperationUI(project.id)
 }
 async function renderOverview(project, root) {
   const metadata = element('div', '', 'space-y-2 text-sm')
@@ -225,9 +325,19 @@ async function renderOverview(project, root) {
   const canOperate = ['owner', 'operator'].includes(project.role)
   if (canOperate) {
     const actions = element('div', '', 'flex flex-wrap gap-2')
+    actions.dataset.projectControls = project.id
     const isRunning = project.desiredState === 'running'
     // A paused project has no running Studio to open.
-    if (isRunning)
+    if (isRunning) {
+      actions.append(
+        button('Connect', async () => {
+          const ticket = await api(`/api/projects/${project.id}/studio-ticket?connect=true`, {
+            method: 'POST',
+            body: '{}',
+          })
+          location.assign(ticket.url)
+        })
+      )
       actions.append(
         button('Open Studio', async () => {
           const ticket = await api(`/api/projects/${project.id}/studio-ticket`, {
@@ -237,10 +347,14 @@ async function renderOverview(project, root) {
           location.assign(ticket.url)
         })
       )
+    }
     // Paused projects keep their data; only the actions that apply are shown.
     const lifecycle = isRunning ? ['stop', 'restart'] : ['start']
-    for (const kind of lifecycle)
-      actions.append(button(operationLabels[kind], () => operation(project, kind)))
+    for (const kind of lifecycle) {
+      const control = button(operationLabels[kind], () => operation(project, kind))
+      control.dataset.operationKind = kind
+      actions.append(control)
+    }
     actions.append(button('Back up now', () => operation(project, 'backup')))
     actions.append(
       button('Show credentials', async () => {
@@ -1572,6 +1686,14 @@ const closeMenus = () => {
   for (const menu of document.querySelectorAll('.menu')) menu.remove()
 }
 const projectStatus = (project) => {
+  const pending = pendingOperations.get(project.id)
+  if (pending)
+    return {
+      key: 'provisioning',
+      label: `${operationProgressLabels[pending.kind] ?? 'Updating project'}…`,
+      icon: 'clock',
+      tone: 'text-brand',
+    }
   if (project.status === 'stopped')
     return { key: 'paused', label: 'Project is paused', icon: 'pause', tone: 'text-subtle' }
   if (project.status === 'ready')
@@ -1655,6 +1777,7 @@ function cardMenu(project, card) {
       })
       item.className = 'menu-item'
       item.setAttribute('role', 'menuitem')
+      if (label !== 'Manage project' && pendingOperations.has(project.id)) item.disabled = true
       menu.append(item)
     }
     card.append(menu)
@@ -1688,6 +1811,7 @@ function projectCard(project) {
   const status = element('p', '', `mt-4 flex items-center gap-2 text-xs ${state.tone}`)
   status.append(icon(state.icon, 'h-3.5 w-3.5'), element('span', state.label))
   card.append(status)
+  card.append(progressContainer(project, true))
   openProject(card, project)
   return card
 }
@@ -1714,6 +1838,7 @@ function projectRow(project) {
     cardMenu(project, row)
   )
   row.append(right)
+  row.append(progressContainer(project, true))
   openProject(row, project)
   return row
 }
@@ -1776,6 +1901,7 @@ function renderProjects() {
       ? 'No projects match the current search or filters.'
       : 'No projects yet.'
   renderUsage()
+  for (const id of projects.keys()) updateOperationUI(id)
 }
 async function loadProjects(reset = false) {
   if (reset) {
@@ -1783,7 +1909,7 @@ async function loadProjects(reset = false) {
     nextCursor = ''
   }
   const page = await api(`/api/projects?limit=30&cursor=${nextCursor ?? ''}`)
-  for (const project of page.projects) projects.set(project.id, project)
+  for (const project of page.projects) rememberProject(project)
   nextCursor = page.nextCursor
   $('more').hidden = !nextCursor
   renderProjects()
@@ -1950,7 +2076,7 @@ try {
       // Refresh loaded projects without discarding pagination or duplicating rows.
       for (const id of [...projects.keys()].slice(0, 30)) {
         try {
-          projects.set(id, await api(`/api/projects/${id}`))
+          rememberProject(await api(`/api/projects/${id}`))
         } catch (error) {
           if (error.status === 404) projects.delete(id)
           else throw error
