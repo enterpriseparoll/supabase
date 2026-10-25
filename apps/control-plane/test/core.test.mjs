@@ -5,6 +5,7 @@ import { parse } from 'yaml'
 import { readFile } from 'node:fs/promises'
 import {
   authorize,
+  cookieName,
   domainName,
   generateSecrets,
   projectId,
@@ -13,8 +14,15 @@ import {
   seal,
   unseal,
 } from '../src/core.mjs'
-import { cookieValue, verifyOrigin } from '../src/auth.mjs'
-import { publicGateway, renderCompose, renderEnv, routeConfiguration } from '../src/templates.mjs'
+import { cookieValue, sessionCookie, verifyOrigin } from '../src/auth.mjs'
+import { configuration } from '../src/config.mjs'
+import {
+  projectEnvironment,
+  publicGateway,
+  renderCompose,
+  renderEnv,
+  routeConfiguration,
+} from '../src/templates.mjs'
 
 const root = new URL('../../../docker/', import.meta.url)
 const id = 'p0123456789abcdef01234567'
@@ -155,4 +163,57 @@ test('rate limiter enforces per-identity budgets and refills over time', () => {
   time += 3600000
   for (let i = 0; i < 3; i++) assert.equal(limiter.take('alice'), true, 'refill caps at capacity')
   assert.equal(limiter.take('alice'), false)
+})
+test('local mode requires no identity provider and refuses to skip the firewall on servers', async () => {
+  const base = {
+    MASTER_KEY: 'ab'.repeat(32),
+    DATABASE_URL: 'postgresql://localhost/control_test',
+  }
+  const local = await configuration({ ...base, PLATFORM_MODE: 'local', LOCAL_ADMIN_TOKEN: 'tok' })
+  assert.equal(local.origin, 'http://manage.localhost:8090')
+  assert.equal(local.firewall, 'skip')
+  assert.equal(local.issuer, undefined)
+  await assert.rejects(configuration({ ...base, PLATFORM_MODE: 'local' }), /LOCAL_ADMIN_TOKEN/)
+  await assert.rejects(configuration({ ...base, PLATFORM_DOMAIN: 'platform.example.com' }), /OIDC/)
+  await assert.rejects(
+    configuration({
+      ...base,
+      PLATFORM_DOMAIN: 'platform.example.com',
+      OIDC_ISSUER: 'https://id.example.com',
+      OIDC_CLIENT_ID: 'c',
+      OIDC_CLIENT_SECRET: 's',
+      OIDC_REQUIRED_ACR: 'mfa',
+      PLATFORM_FIREWALL: 'skip',
+    }),
+    /only allowed with PLATFORM_MODE=local/
+  )
+  await assert.rejects(configuration({ ...base, PLATFORM_MODE: 'dev' }), /PLATFORM_MODE/)
+})
+test('local mode serves projects over plain HTTP on localhost with non-Secure cookies', () => {
+  const config = { local: true, publicPort: 8090, baseDomain: 'localhost' }
+  const route = routeConfiguration(project, [], config)
+  for (const router of Object.values(route.http.routers)) {
+    assert.deepEqual(router.entryPoints, ['web'])
+    assert.equal(router.tls, undefined)
+  }
+  assert.equal(route.http.routers[`${id}-api`].rule, `Host(\`${id}.api.localhost\`)`)
+  const env = projectEnvironment(project, {}, config)
+  assert.equal(env.SUPABASE_PUBLIC_URL, `http://${id}.api.localhost:8090`)
+  assert.equal(env.API_EXTERNAL_URL, `http://${id}.api.localhost:8090/auth/v1`)
+  assert.equal(cookieName(config, 'platform'), 'platform')
+  assert.equal(cookieName({}, 'platform'), '__Host-platform')
+  assert(!sessionCookie('platform', 'x', 60, false).includes('Secure'))
+  assert(sessionCookie('__Host-platform', 'x').includes('Secure'))
+  const server = routeConfiguration(project, [], { baseDomain: 'platform.example.com' })
+  assert.equal(server.http.routers[`${id}-api`].tls.certResolver, 'letsencrypt')
+  assert.equal(
+    projectEnvironment(project, {}, { baseDomain: 'platform.example.com' }).SUPABASE_PUBLIC_URL,
+    `https://${id}.api.platform.example.com`
+  )
+  const site = { name: 'App', siteUrl: 'http://localhost:3000' }
+  assert.throws(() => projectInput(site))
+  assert.equal(projectInput(site, { allowLocalhost: true }).siteUrl, 'http://localhost:3000/')
+  assert.throws(() =>
+    projectInput({ name: 'App', siteUrl: 'http://example.com' }, { allowLocalhost: true })
+  )
 })

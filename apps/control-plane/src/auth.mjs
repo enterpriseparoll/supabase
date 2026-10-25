@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose'
-import { hash, invariant, seal, token, unseal } from './core.mjs'
+import { cookieName, hash, HttpError, invariant, seal, token, unseal } from './core.mjs'
 import { audit, roleFor, sessionSubject, transaction } from './database.mjs'
 
 export function cookieValue(header, name) {
@@ -7,8 +7,8 @@ export function cookieValue(header, name) {
   const matches = entries.filter(([key]) => key === name)
   return matches.length === 1 ? matches[0][1] : undefined
 }
-export const sessionCookie = (name, value, age = 3600) =>
-  `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`
+export const sessionCookie = (name, value, age = 3600, secure = true) =>
+  `${name}=${value}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=${age}`
 export function verifyOrigin(request, expected) {
   invariant(request.headers.origin === expected, 403, 'Request origin is not allowed')
 }
@@ -131,8 +131,11 @@ export async function oidcClient(config, dependencies = {}) {
     },
   }
 }
-export async function authenticate(pool, request) {
-  const subject = await sessionSubject(pool, cookieValue(request.headers.cookie, '__Host-platform'))
+export async function authenticate(pool, request, config = {}) {
+  const subject = await sessionSubject(
+    pool,
+    cookieValue(request.headers.cookie, cookieName(config, 'platform'))
+  )
   invariant(subject, 401, 'Sign in to continue')
   return subject
 }

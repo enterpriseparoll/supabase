@@ -26,7 +26,8 @@ for (const [role, password] of Object.entries(passwords)) {
 for (const [name, value] of Object.entries(secrets)) {
   const path = `${root}/secrets/${name}`
   await writeFile(path, value, { flag: 'wx', mode: 0o400 })
-  if (process.platform === 'linux') await chown(path, 1000, 1000)
+  // PostgreSQL (alpine UID 70) reads the db_* passwords; the Node runtime (UID 1000) reads the rest.
+  if (process.platform === 'linux') await chown(path, name.startsWith('db_') ? 70 : 1000, name.startsWith('db_') ? 70 : 1000)
 }
 const routes = {
   http: {

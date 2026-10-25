@@ -20,6 +20,11 @@ export const hash = (value) => createHash('sha256').update(value).digest('hex')
 export function invariant(condition, status, message) {
   if (!condition) throw new HttpError(status, message)
 }
+// Local mode serves plain HTTP on *.localhost with a port; server mode is HTTPS on 443.
+export const publicUrl = (config, host) =>
+  `${config.local ? 'http' : 'https'}://${host}${config.local ? `:${config.publicPort}` : ''}`
+// __Host- cookies require Secure, which browsers do not offer on plain-HTTP origins.
+export const cookieName = (config, name) => `${config.local ? '' : '__Host-'}${name}`
 export function projectId(value) {
   invariant(typeof value === 'string' && /^p[a-f0-9]{24}$/.test(value), 400, 'Invalid project ID')
   return value
@@ -35,7 +40,7 @@ export function domainName(value) {
   )
   return value
 }
-export function projectInput(input) {
+export function projectInput(input, { allowLocalhost = false } = {}) {
   invariant(
     input && typeof input === 'object' && !Array.isArray(input),
     400,
@@ -60,10 +65,16 @@ export function projectInput(input) {
   } catch {
     throw new HttpError(400, 'Enter an HTTPS application URL')
   }
+  const localhost = site.hostname === 'localhost' || site.hostname.endsWith('.localhost')
   invariant(
-    site.protocol === 'https:' && !site.username && !site.password && !site.hash,
+    (site.protocol === 'https:' || (allowLocalhost && localhost && site.protocol === 'http:')) &&
+      !site.username &&
+      !site.password &&
+      !site.hash,
     400,
-    'Enter an HTTPS application URL'
+    allowLocalhost
+      ? 'Enter an HTTPS or http://localhost application URL'
+      : 'Enter an HTTPS application URL'
   )
   const memoryMb = input.memoryMb ?? 4096
   const cpus = input.cpus ?? 2

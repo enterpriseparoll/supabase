@@ -1,11 +1,21 @@
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { configuration } from './config.mjs'
 import { database, audit, roleFor, sessionSubject, transaction } from './database.mjs'
 import { authenticate, cookieValue, oidcClient, sessionCookie, verifyOrigin } from './auth.mjs'
-import { authorize, hash, HttpError, invariant, projectId, rateLimiter, token } from './core.mjs'
+import {
+  authorize,
+  cookieName,
+  hash,
+  HttpError,
+  invariant,
+  projectId,
+  publicUrl,
+  rateLimiter,
+  token,
+} from './core.mjs'
 import {
   addDomain,
   createProject,
@@ -35,6 +45,44 @@ async function body(request) {
     throw new HttpError(400, 'Invalid JSON')
   }
 }
+async function formField(request, name) {
+  invariant(
+    request.headers['content-type']?.split(';')[0] === 'application/x-www-form-urlencoded',
+    415,
+    'Send a form'
+  )
+  let text = ''
+  for await (const chunk of request) {
+    text += chunk
+    invariant(text.length <= 4096, 413, 'Request is too large')
+  }
+  return new URLSearchParams(text).get(name)
+}
+export const LOCAL_ADMIN = 'local-admin'
+const localLoginPage = (failed) => `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in · Local project platform</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="bg-background text-foreground font-sans antialiased">
+    <main class="mx-auto max-w-md px-6 py-16">
+      <h1 class="text-3xl font-semibold tracking-tight">Sign in</h1>
+      <p class="mt-3 text-subtle">
+        Paste the sign-in token printed by <code>docker compose -f compose.local.yml logs local-init</code>.
+      </p>
+      ${failed ? '<p role="alert" class="my-4 text-sm">That token didn’t match. Copy it again from the logs.</p>' : ''}
+      <form method="post" action="/auth/local" class="mt-6 grid gap-4">
+        <label class="grid gap-2 text-sm">Sign-in token
+          <input name="token" type="password" autocomplete="off" required autofocus />
+        </label>
+        <button type="submit" class="rounded border border-border px-4 py-2">Sign in</button>
+      </form>
+    </main>
+  </body>
+</html>`
 function send(response, status, value, headers = {}) {
   response.writeHead(status, {
     'Content-Type': 'application/json',
@@ -56,6 +104,8 @@ export function managementServer(pool, config, oidc) {
     ['/dashboard.mjs', ['dashboard.mjs', 'text/javascript']],
     ['/styles.css', ['styles.css', 'text/css']],
   ])
+  const cookie = (name) => cookieName(config, name)
+  const setCookie = (name, value, age) => sessionCookie(cookie(name), value, age, !config.local)
   return createServer(
     { maxHeaderSize: 16384, requestTimeout: 15000, headersTimeout: 10000 },
     async (request, response) => {
@@ -77,10 +127,17 @@ export function managementServer(pool, config, oidc) {
         }
         if (path === '/internal/studio-auth') {
           const host = request.headers['x-forwarded-host']
-          const match = typeof host === 'string' && host.match(/^([a-z0-9]+)\.studio\.(.+)$/)
+          // Local mode browsers send the published port in Host; server mode uses 443.
+          const hostname =
+            typeof host === 'string' && config.local
+              ? host.replace(`:${config.publicPort}`, '')
+              : host
+          const match =
+            typeof hostname === 'string' && hostname.match(/^([a-z0-9]+)\.studio\.(.+)$/)
           invariant(match && match[2] === config.baseDomain, 403, 'Invalid Studio host')
           const id = projectId(match[1])
-          const forwarded = new URL(request.headers['x-forwarded-uri'] ?? '/', `https://${host}`)
+          const studioOrigin = publicUrl(config, hostname)
+          const forwarded = new URL(request.headers['x-forwarded-uri'] ?? '/', studioOrigin)
           if (
             forwarded.pathname === '/_platform/session' &&
             request.headers['x-forwarded-method'] === 'GET'
@@ -109,18 +166,18 @@ export function managementServer(pool, config, oidc) {
             })
             return send(response, 303, undefined, {
               Location: '/',
-              'Set-Cookie': sessionCookie('__Host-studio', raw),
+              'Set-Cookie': setCookie('studio', raw),
             })
           }
           const subject = await sessionSubject(
             pool,
-            cookieValue(request.headers.cookie, '__Host-studio'),
+            cookieValue(request.headers.cookie, cookie('studio')),
             id
           )
           invariant(subject, 401, 'Open Studio from the project dashboard')
           await projectAccess(pool, subject, id, 'studio')
           const method = request.headers['x-forwarded-method']
-          if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) verifyOrigin(request, `https://${host}`)
+          if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) verifyOrigin(request, studioOrigin)
           return send(response, 204)
         }
         if (request.method === 'GET' && assets.has(path)) {
@@ -129,7 +186,35 @@ export function managementServer(pool, config, oidc) {
           response.end(await readFile(new URL(`../public/${file}`, import.meta.url)))
           return
         }
-        if (path === '/auth/login' && request.method === 'GET') {
+        if (config.local && path === '/auth/login' && request.method === 'GET') {
+          response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+          return response.end(localLoginPage(url.searchParams.has('failed')))
+        }
+        if (config.local && path === '/auth/local' && request.method === 'POST') {
+          verifyOrigin(request, config.origin)
+          invariant(
+            limits.sensitive.take('@local-login'),
+            429,
+            'Too many sign-in attempts. Wait a minute.'
+          )
+          const supplied = (await formField(request, 'token')) ?? ''
+          const matches = timingSafeEqual(
+            Buffer.from(hash(supplied), 'hex'),
+            Buffer.from(hash(config.localAdminToken), 'hex')
+          )
+          if (!matches) return send(response, 303, undefined, { Location: '/auth/login?failed' })
+          const raw = token()
+          await pool.query(
+            "INSERT INTO control.sessions(token_hash,subject,expires_at) VALUES($1,$2,now()+interval '12 hours')",
+            [hash(raw), LOCAL_ADMIN]
+          )
+          await audit(pool, LOCAL_ADMIN, 'session.created')
+          return send(response, 303, undefined, {
+            Location: '/',
+            'Set-Cookie': setCookie('platform', raw, 43200),
+          })
+        }
+        if (!config.local && path === '/auth/login' && request.method === 'GET') {
           // Short-lived flows are bounded in the database and expire even if abandoned.
           const outstanding = (
             await pool.query(
@@ -140,25 +225,22 @@ export function managementServer(pool, config, oidc) {
           const flow = await oidc.begin(pool)
           return send(response, 302, undefined, {
             Location: flow.url,
-            'Set-Cookie': sessionCookie('__Host-login', flow.state, 600),
+            'Set-Cookie': setCookie('login', flow.state, 600),
           })
         }
-        if (path === '/auth/callback' && request.method === 'GET') {
+        if (!config.local && path === '/auth/callback' && request.method === 'GET') {
           const raw = await oidc.finish(
             pool,
             url.searchParams.get('code'),
             url.searchParams.get('state'),
-            cookieValue(request.headers.cookie, '__Host-login')
+            cookieValue(request.headers.cookie, cookie('login'))
           )
           return send(response, 303, undefined, {
             Location: '/',
-            'Set-Cookie': [
-              sessionCookie('__Host-platform', raw),
-              sessionCookie('__Host-login', '', 0),
-            ],
+            'Set-Cookie': [setCookie('platform', raw), setCookie('login', '', 0)],
           })
         }
-        const subject = await authenticate(pool, request)
+        const subject = await authenticate(pool, request, config)
         if (!['GET', 'HEAD'].includes(request.method)) {
           verifyOrigin(request, config.origin)
           invariant(
@@ -171,12 +253,7 @@ export function managementServer(pool, config, oidc) {
         if (path === '/auth/logout' && request.method === 'POST') {
           await pool.query('DELETE FROM control.sessions WHERE subject=$1', [subject])
           await audit(pool, subject, 'session.revoked')
-          return send(
-            response,
-            200,
-            { ok: true },
-            { 'Set-Cookie': sessionCookie('__Host-platform', '', 0) }
-          )
+          return send(response, 200, { ok: true }, { 'Set-Cookie': setCookie('platform', '', 0) })
         }
         if (path === '/api/me' && request.method === 'GET')
           return send(response, 200, {
@@ -343,7 +420,7 @@ export function managementServer(pool, config, oidc) {
               [hash(ticket), subject, id]
             )
             return send(response, 200, {
-              url: `https://${id}.studio.${config.baseDomain}/_platform/session?ticket=${ticket}`,
+              url: `${publicUrl(config, `${id}.studio.${config.baseDomain}`)}/_platform/session?ticket=${ticket}`,
             })
           }
           if (resource === 'members' && request.method === 'GET') {
@@ -423,7 +500,13 @@ export function managementServer(pool, config, oidc) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = await configuration()
   const pool = database(config.databaseUrl)
-  const server = managementServer(pool, config, await oidcClient(config))
+  if (config.local)
+    // The single local operator is always an owner; there is no identity provider.
+    await pool.query(
+      "INSERT INTO control.members(subject,role) VALUES($1,'owner') ON CONFLICT (subject) DO NOTHING",
+      [LOCAL_ADMIN]
+    )
+  const server = managementServer(pool, config, config.local ? null : await oidcClient(config))
   server.listen(config.port, '0.0.0.0', () =>
     console.log(JSON.stringify({ event: 'control.listening', port: config.port }))
   )

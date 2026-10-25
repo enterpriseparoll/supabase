@@ -1,5 +1,41 @@
 # Deploying the self-hosted platform
 
+## Local mode (one developer machine)
+
+`compose.local.yml` runs the same control plane on Docker Desktop (Windows or
+macOS) or a Linux workstation so you can create and try multiple projects
+locally. It is not a server deployment: it uses plain HTTP on `*.localhost`, a
+generated sign-in token instead of OIDC and MFA, and skips the host firewall
+helper. Traefik listens on `127.0.0.1` only.
+
+From this directory:
+
+```sh
+docker compose -f compose.local.yml up -d --build
+docker compose -f compose.local.yml logs local-init
+```
+
+The second command prints the dashboard URL (`http://manage.localhost:8090`) and
+the sign-in token. Each project you create gets its own database, Auth, REST,
+Storage, Realtime, and Studio, reachable at
+`http://<project-id>.api.localhost:8090` and `http://<project-id>.studio.localhost:8090`.
+Browsers resolve `*.localhost` to your machine without DNS changes.
+
+Settings (set in the shell or a `.env` file next to `compose.local.yml`):
+
+- `LOCAL_PORT` (default `8090`): published port for the dashboard and projects.
+- `HOST_CAPACITY_MB` / `HOST_CAPACITY_CPUS` (defaults `8192` / `4`): budget for all
+  projects together. Each project needs at least 2048 MiB; keep the total below
+  the memory Docker Desktop is allowed to use.
+- `PLATFORM_DATA_ROOT` (default `/srv/supabase-platform`): where secrets, routes,
+  and project data live inside the Docker engine's filesystem (the Docker Desktop
+  VM), not in this repository.
+
+Local mode refuses `PLATFORM_FIREWALL=skip` without `PLATFORM_MODE=local`, so the
+server deployment below cannot be switched into it by a stray variable. To remove
+everything, delete the projects in the dashboard, then run
+`docker compose -f compose.local.yml down -v`.
+
 ## Deployment requirements
 
 Use a dedicated Linux host with Docker Engine's iptables firewall backend,

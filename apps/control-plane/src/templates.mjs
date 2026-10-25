@@ -1,5 +1,5 @@
 import { parse, stringify } from 'yaml'
-import { invariant, projectId } from './core.mjs'
+import { invariant, projectId, publicUrl } from './core.mjs'
 
 export const projectName = (id) => `sp-${projectId(id)}`
 export function renderCompose(source, project) {
@@ -74,7 +74,7 @@ export function renderEnv(source, values) {
   return lines.join('\n')
 }
 export function projectEnvironment(project, secrets, config) {
-  const url = `https://${project.id}.api.${config.baseDomain}`
+  const url = publicUrl(config, `${project.id}.api.${config.baseDomain}`)
   return {
     ...secrets,
     SUPABASE_PUBLIC_URL: url,
@@ -99,19 +99,21 @@ export function routeConfiguration(project, domains, config) {
   const id = projectId(project.id)
   const apiHosts = [`${id}.api.${config.baseDomain}`, ...domains]
   const apiRule = apiHosts.map((host) => `Host(\`${host}\`)`).join(' || ')
+  // Local mode has a single plain-HTTP entrypoint and no certificate resolver.
+  const entry = config.local
+    ? { entryPoints: ['web'] }
+    : { entryPoints: ['websecure'], tls: { certResolver: 'letsencrypt' } }
   const routers = {
     [`${id}-api`]: {
       rule: apiRule,
-      entryPoints: ['websecure'],
+      ...entry,
       service: `${id}-api`,
-      tls: { certResolver: 'letsencrypt' },
       middlewares: ['api-limit@file'],
     },
     [`${id}-studio`]: {
       rule: `Host(\`${id}.studio.${config.baseDomain}\`)`,
-      entryPoints: ['websecure'],
+      ...entry,
       service: `${id}-studio`,
-      tls: { certResolver: 'letsencrypt' },
       middlewares: ['studio-auth@file', 'studio-headers@file'],
     },
   }

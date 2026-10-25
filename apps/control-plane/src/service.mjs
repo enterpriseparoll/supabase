@@ -8,6 +8,7 @@ import {
   operationAction,
   projectId,
   projectInput,
+  publicUrl,
   seal,
   unseal,
   domainName,
@@ -19,8 +20,8 @@ export const publicProject = (row, config) => ({
   name: row.name,
   status: row.status,
   desiredState: row.desired_state,
-  apiUrl: `https://${row.id}.api.${config.baseDomain}`,
-  studioUrl: `https://${row.id}.studio.${config.baseDomain}`,
+  apiUrl: publicUrl(config, `${row.id}.api.${config.baseDomain}`),
+  studioUrl: publicUrl(config, `${row.id}.studio.${config.baseDomain}`),
   siteUrl: row.site_url,
   memoryMb: row.memory_mb,
   cpus: Number(row.cpus),
@@ -72,7 +73,7 @@ export async function enqueue(db, { actor, project, kind, payload = {}, key, req
   return operation
 }
 export async function createProject(pool, config, actor, input, key) {
-  const values = projectInput(input)
+  const values = projectInput(input, { allowLocalhost: config.local })
   return transaction(pool, async (db) => {
     authorize(await roleFor(db, actor), 'create')
     // Serialize reservations and idempotency checks, not project count.
@@ -228,7 +229,7 @@ export async function projectSecrets(pool, config, actor, id) {
     await audit(db, actor, 'project.secrets.read', id)
     const secret = unseal(project.encrypted_secrets, config.key, id)
     return {
-      apiUrl: `https://${id}.api.${config.baseDomain}`,
+      apiUrl: publicUrl(config, `${id}.api.${config.baseDomain}`),
       publishableKey: secret.SUPABASE_PUBLISHABLE_KEY,
       secretKey: secret.SUPABASE_SECRET_KEY,
       anonKey: secret.ANON_KEY,

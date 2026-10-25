@@ -1,0 +1,146 @@
+# Local multi-project platform for one developer machine (Docker Desktop or Linux).
+# Not for servers: plain HTTP, a generated sign-in token instead of OIDC/MFA, and
+# no host firewall rules. Listens on 127.0.0.1 only. See README "Local mode".
+#
+#   docker compose -f compose.local.yml up -d --build
+#   docker compose -f compose.local.yml logs local-init   # dashboard URL + sign-in token
+#
+# Data lives under PLATFORM_DATA_ROOT inside the Docker engine's filesystem (the
+# Docker Desktop VM on Windows/macOS), not in this repository.
+name: supabase-platform-local
+
+x-runtime: &runtime
+  image: supabase-platform:local
+  build:
+    context: ../..
+    dockerfile: deploy/platform/Dockerfile
+  init: true
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: local
+    options: { max-size: 10m, max-file: '3' }
+  environment: &environment
+    PLATFORM_MODE: local
+    LOCAL_PORT: ${LOCAL_PORT:-8090}
+    LOCAL_ADMIN_TOKEN_FILE: /run/secrets/local_admin_token
+    MASTER_KEY_FILE: /run/secrets/master_key
+    DATABASE_URL_FILE: /run/secrets/database_url_api
+    PLATFORM_DATA_ROOT: ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}
+    PLATFORM_ROUTE_ROOT: ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/routes
+    HOST_CAPACITY_MB: ${HOST_CAPACITY_MB:-8192}
+    HOST_CAPACITY_CPUS: ${HOST_CAPACITY_CPUS:-4}
+  volumes:
+    - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets:/run/secrets:ro
+
+services:
+  local-init:
+    <<: *runtime
+    restart: 'no'
+    user: '0:0'
+    command: [node, src/local-init.mjs]
+    volumes:
+      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}:${PLATFORM_DATA_ROOT:-/srv/supabase-platform}
+    network_mode: none
+
+  control-db:
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: control_owner
+      POSTGRES_DB: control
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_owner_password
+    volumes:
+      - control-db:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/10-platform.sh:ro
+      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets:/run/secrets:ro
+    depends_on:
+      local-init: { condition: service_completed_successfully }
+    networks: [control]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U control_owner -d control']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+    cpus: 1
+    logging: { driver: local, options: { max-size: 10m, max-file: '3' } }
+
+  migrate:
+    <<: *runtime
+    restart: 'no'
+    command: [node, src/cli.mjs, migrate]
+    environment:
+      <<: *environment
+      DATABASE_URL_FILE: /run/secrets/database_url_owner
+    depends_on:
+      control-db: { condition: service_healthy }
+    networks: [control]
+
+  api:
+    <<: *runtime
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [control, edge]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 128
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    <<: *runtime
+    user: '0:0'
+    command: [node, src/worker.mjs]
+    environment:
+      <<: *environment
+      DATABASE_URL_FILE: /run/secrets/database_url_worker
+      ENABLE_DOCKER_WORKER: 'true'
+      PLATFORM_IMAGE: supabase-platform:local
+    volumes:
+      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets:/run/secrets:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}:${PLATFORM_DATA_ROOT:-/srv/supabase-platform}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [control, worker-egress]
+    mem_limit: 1024m
+    cpus: 1
+
+  traefik:
+    image: traefik:v3@sha256:c8a121e4bb1347e8fd52657fab12f2cb70b68f8a018895e2068f92c9e519b9c2
+    container_name: supabase-platform-traefik
+    restart: unless-stopped
+    command:
+      - --entrypoints.web.address=:80
+      - --providers.file.directory=/routes
+      - --providers.file.watch=true
+      - --api.dashboard=false
+      - --log.level=ERROR
+    ports: ['127.0.0.1:${LOCAL_PORT:-8090}:80']
+    volumes:
+      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/routes:/routes:ro
+    depends_on:
+      local-init: { condition: service_completed_successfully }
+    networks: [edge]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 1
+
+networks:
+  control: { internal: true }
+  edge: {}
+  worker-egress: {}
+volumes:
+  control-db: {}

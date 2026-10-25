@@ -424,3 +424,93 @@ test('credential disclosure is rate limited per identity', async () => {
   assert.deepEqual(statuses, [200, 200, 200, 200, 200, 429])
   assert.equal((await reveal(ownerCookie)).status, 200, 'other identities keep their budget')
 })
+test('local mode signs in with the generated token over plain HTTP', async () => {
+  const localConfig = {
+    ...config,
+    local: true,
+    publicPort: 8090,
+    baseDomain: 'localhost',
+    origin: 'http://manage.localhost:8090',
+    localAdminToken: 'correct-local-token',
+  }
+  await pool.query(
+    "INSERT INTO control.members(subject,role) VALUES('local-admin','owner') ON CONFLICT DO NOTHING"
+  )
+  const local = managementServer(pool, localConfig, null)
+  await new Promise((resolve) => local.listen(0, '127.0.0.1', resolve))
+  const at = `http://127.0.0.1:${local.address().port}`
+  try {
+    const page = await fetch(`${at}/auth/login`)
+    assert.equal(page.status, 200)
+    assert.match(await page.text(), /Sign-in token/)
+    assert.equal((await fetch(`${at}/auth/callback?code=x&state=y`)).status, 401)
+    const signIn = (value, origin = localConfig.origin) =>
+      fetch(`${at}/auth/local`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: origin },
+        body: new URLSearchParams({ token: value }),
+      })
+    const wrong = await signIn('wrong-token')
+    assert.equal(wrong.status, 303)
+    assert.equal(wrong.headers.get('location'), '/auth/login?failed')
+    assert.equal(wrong.headers.get('set-cookie'), null)
+    assert.equal((await signIn('correct-local-token', 'http://evil.localhost')).status, 403)
+    const right = await signIn('correct-local-token')
+    assert.equal(right.status, 303)
+    const setCookie = right.headers.get('set-cookie')
+    assert.match(setCookie, /^platform=[A-Za-z0-9_-]{43};/)
+    assert(!setCookie.includes('Secure'))
+    const cookie = setCookie.split(';')[0]
+    const me = await fetch(`${at}/api/me`, { headers: { Cookie: cookie } })
+    assert.deepEqual(await me.json(), { subject: 'local-admin', role: 'owner' })
+    const created = await fetch(`${at}/api/projects`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookie,
+        Origin: localConfig.origin,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'local-mode-create',
+      },
+      body: JSON.stringify({ name: 'Local app', siteUrl: 'http://localhost:3000' }),
+    })
+    assert.equal(created.status, 202)
+    const { project_id: projectId } = await created.json()
+    const listed = await (
+      await fetch(`${at}/api/projects/${projectId}`, { headers: { Cookie: cookie } })
+    ).json()
+    assert.equal(listed.apiUrl, `http://${projectId}.api.localhost:8090`)
+    const ticket = await (
+      await fetch(`${at}/api/projects/${projectId}/studio-ticket`, {
+        method: 'POST',
+        headers: { Cookie: cookie, Origin: localConfig.origin },
+      })
+    ).json()
+    const handoff = new URL(ticket.url)
+    assert.equal(handoff.origin, `http://${projectId}.studio.localhost:8090`)
+    const studio = await fetch(`${at}/internal/studio-auth`, {
+      redirect: 'manual',
+      headers: {
+        'X-Forwarded-Host': handoff.host,
+        'X-Forwarded-URI': `${handoff.pathname}${handoff.search}`,
+        'X-Forwarded-Method': 'GET',
+      },
+    })
+    assert.equal(studio.status, 303)
+    const studioCookie = studio.headers.get('set-cookie').split(';')[0]
+    assert.match(studioCookie, /^studio=/)
+    const check = (host) =>
+      fetch(`${at}/internal/studio-auth`, {
+        headers: {
+          'X-Forwarded-Host': host,
+          'X-Forwarded-URI': '/',
+          'X-Forwarded-Method': 'GET',
+          Cookie: studioCookie,
+        },
+      })
+    assert.equal((await check(handoff.host)).status, 204)
+    assert.equal((await check(`${projectId}.studio.localhost:9999`)).status, 403)
+  } finally {
+    await new Promise((resolve) => local.close(resolve))
+  }
+})

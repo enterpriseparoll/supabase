@@ -188,26 +188,29 @@ export class Infrastructure {
     }
     // Run only this approved firewall helper with host network administration.
     // It has no host filesystem or Docker socket mounts and no public listener.
-    await command('docker', [
-      'run',
-      '--rm',
-      '--network',
-      'host',
-      '--user',
-      '0:0',
-      '--cap-drop',
-      'ALL',
-      '--cap-add',
-      'NET_ADMIN',
-      '--security-opt',
-      'no-new-privileges:true',
-      '--entrypoint',
-      'node',
-      this.config.executionImage,
-      '/app/src/firewall.mjs',
-      project.id,
-      ...subnets,
-    ])
+    // Local mode skips it: Docker Desktop's VM firewall is not the host's, and
+    // project networks stay internal either way.
+    if (this.config.firewall !== 'skip')
+      await command('docker', [
+        'run',
+        '--rm',
+        '--network',
+        'host',
+        '--user',
+        '0:0',
+        '--cap-drop',
+        'ALL',
+        '--cap-add',
+        'NET_ADMIN',
+        '--security-opt',
+        'no-new-privileges:true',
+        '--entrypoint',
+        'node',
+        this.config.executionImage,
+        '/app/src/firewall.mjs',
+        project.id,
+        ...subnets,
+      ])
     await this.compose(project, ['up', '-d', '--wait', '--wait-timeout', '300'])
     const probe = `const targets=[['/auth/v1/health',{}],['/rest/v1/',{apikey:process.env.SUPABASE_ANON_KEY,Authorization:'Bearer '+process.env.SUPABASE_ANON_KEY}]];for(const [path,headers] of targets){const response=await fetch('http://api-gw:8000'+path,{headers,signal:AbortSignal.timeout(10000)});if(!response.ok)process.exit(1)}`
     await this.compose(project, [

@@ -8,23 +8,47 @@ export async function configuration(env = process.env) {
   }
   const secret = async (name) =>
     env[`${name}_FILE`] ? (await readFile(env[`${name}_FILE`], 'utf8')).trim() : required(name)
-  const baseDomain = domainName(required('PLATFORM_DOMAIN'))
-  const origin = `https://manage.${baseDomain}`
+  const local = env.PLATFORM_MODE === 'local'
+  invariant(
+    local || env.PLATFORM_MODE === undefined || env.PLATFORM_MODE === 'server',
+    500,
+    'PLATFORM_MODE must be server or local'
+  )
+  const publicPort = Number(env.LOCAL_PORT ?? 8090)
+  invariant(
+    !local || (Number.isInteger(publicPort) && publicPort > 0 && publicPort < 65536),
+    500,
+    'Invalid LOCAL_PORT'
+  )
+  // Local mode is for a single developer machine: plain HTTP on *.localhost, a
+  // generated sign-in token instead of OIDC, and no host firewall changes.
+  const baseDomain = local ? 'localhost' : domainName(required('PLATFORM_DOMAIN'))
+  const origin = local ? `http://manage.localhost:${publicPort}` : `https://manage.${baseDomain}`
   const key = await secret('MASTER_KEY')
   invariant(
     /^[a-f0-9]{64}$/.test(key),
     500,
     'MASTER_KEY must contain 64 lowercase hexadecimal characters'
   )
+  const firewall = env.PLATFORM_FIREWALL ?? (local ? 'skip' : 'enforce')
+  invariant(
+    firewall === 'enforce' || (local && firewall === 'skip'),
+    500,
+    'PLATFORM_FIREWALL=skip is only allowed with PLATFORM_MODE=local'
+  )
   return {
     databaseUrl: await secret('DATABASE_URL'),
     key,
     baseDomain,
     origin,
-    issuer: required('OIDC_ISSUER'),
-    clientId: required('OIDC_CLIENT_ID'),
-    clientSecret: await secret('OIDC_CLIENT_SECRET'),
-    requiredAcr: required('OIDC_REQUIRED_ACR'),
+    local,
+    publicPort: local ? publicPort : undefined,
+    localAdminToken: local ? await secret('LOCAL_ADMIN_TOKEN') : undefined,
+    firewall,
+    issuer: local ? undefined : required('OIDC_ISSUER'),
+    clientId: local ? undefined : required('OIDC_CLIENT_ID'),
+    clientSecret: local ? undefined : await secret('OIDC_CLIENT_SECRET'),
+    requiredAcr: local ? undefined : required('OIDC_REQUIRED_ACR'),
     dataRoot: env.PLATFORM_DATA_ROOT ?? '/srv/supabase-platform',
     routeRoot: env.PLATFORM_ROUTE_ROOT ?? '/srv/supabase-platform/routes',
     templateRoot: env.PLATFORM_TEMPLATE_ROOT ?? '/opt/platform/docker',
