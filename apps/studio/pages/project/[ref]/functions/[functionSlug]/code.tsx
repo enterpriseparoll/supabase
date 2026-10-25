@@ -198,6 +198,7 @@ const CodePage = () => {
       {isSuccessLoadingFiles && (
         <>
           <FileExplorerAndEditor
+            canEdit={canManageFunctions}
             files={files}
             selectedFileId={selectedFileId ?? defaultSelectedFileId}
             setSelectedFileId={setSelectedFileId}

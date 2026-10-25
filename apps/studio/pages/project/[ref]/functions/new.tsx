@@ -31,6 +31,7 @@ import {
 } from 'ui'
 import * as z from 'zod'
 
+import { useCanManageEdgeFunctions } from '@/components/interfaces/EdgeFunctions/useCanManageEdgeFunctions'
 import { EDGE_FUNCTION_TEMPLATES } from '@/components/interfaces/Functions/Functions.templates'
 import { DefaultLayout } from '@/components/layouts/DefaultLayout'
 import EdgeFunctionsLayout from '@/components/layouts/EdgeFunctionsLayout/EdgeFunctionsLayout'
@@ -120,6 +121,7 @@ const NewFunctionPage = () => {
   const track = useTrack()
   const showStripeExample = useIsFeatureEnabled('edge_functions:show_stripe_example')
   const { openSidebar } = useSidebarManagerSnapshot()
+  const { canManageFunctions } = useCanManageEdgeFunctions()
 
   const [files, setFiles] = useState<FileData[]>(INITIAL_FILES)
   const [selectedFileId, setSelectedFileId] = useState<number>(INITIAL_FILES[0].id)
@@ -352,6 +354,7 @@ const NewFunctionPage = () => {
       }
     >
       <FileExplorerAndEditor
+        canEdit={canManageFunctions}
         files={files}
         onFilesChange={setFiles}
         aiEndpoint={`${BASE_PATH}/api/ai/code/complete`}
