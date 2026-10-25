@@ -104,6 +104,24 @@ GitHub deploys and MCP use, and secrets are stored in `volumes/functions/.secret
 Restart existing projects once after updating so Studio gets write access and the
 router picks up secrets.
 
+**Auth settings in Studio.** With the platform Studio image, Authentication has the
+same settings pages as Supabase Cloud: Emails (templates and SMTP), Sign In /
+Providers, OAuth Apps and OAuth Server, Sessions, Rate Limits, Multi-Factor, URL
+Configuration, Attack Protection, Auth Hooks, Audit Logs, and Performance.
+
+- **How saving works:** Studio writes your changes to the project's
+  `volumes/auth-config/settings.json`. The Auth server watches that folder and
+  reloads within about 5 seconds, without a restart. Studio keeps what you changed
+  in `volumes/auth-config/studio/`; everything else shows the Auth server's own
+  settings from the project environment.
+- **Email templates:** the Auth server fetches customized emails from Studio, so
+  Studio must be running to send them.
+- **Applied on next restart:** turning off a session time limit after setting one,
+  and the database pool size under Performance.
+- **Not available:** Third-Party Auth and SAML SSO need Supabase's cloud services.
+
+Restart existing projects once after updating so the Auth server watches the folder.
+
 **One-click projects.** **Create project** has an optional **Start from GitHub**
 section. When the project is ready, it deploys the repository and runs `seed.sql`
 once. A README link of the form

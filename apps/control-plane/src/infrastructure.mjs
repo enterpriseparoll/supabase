@@ -109,6 +109,8 @@ export class Infrastructure {
       `${directory}/volumes/functions/main`,
       { recursive: true, force: true }
     )
+    // Shared by Studio (writes Auth settings) and the Auth server (reads them as user 1000).
+    await mkdir(`${directory}/volumes/auth-config`, { recursive: true, mode: 0o755 })
     await mkdir(`${directory}/volumes/storage`, { recursive: true, mode: 0o700 })
     await mkdir(`${directory}/volumes/db/data`, { recursive: true, mode: 0o700 })
     const secrets = unseal(project.encrypted_secrets, this.config.key, project.id)

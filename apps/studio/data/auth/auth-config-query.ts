@@ -4,7 +4,6 @@ import { useCallback } from 'react'
 import { authKeys } from './keys'
 import type { components } from '@/data/api'
 import { get, handleError } from '@/data/fetchers'
-import { IS_PLATFORM } from '@/lib/constants'
 import type { ResponseError, UseCustomQueryOptions } from '@/types'
 
 export type AuthConfigVariables = {
@@ -41,7 +40,8 @@ export const useAuthConfigQuery = <TData = ProjectAuthConfigData>(
   useQuery<ProjectAuthConfigData, ProjectAuthConfigError, TData>({
     queryKey: authKeys.authConfig(projectRef),
     queryFn: ({ signal }) => getProjectAuthConfig({ projectRef }, signal),
-    enabled: enabled && IS_PLATFORM && typeof projectRef !== 'undefined' && projectRef !== '_',
+    // Self-hosted Studio serves Auth settings itself (lib/api/self-hosted/auth-config).
+    enabled: enabled && typeof projectRef !== 'undefined' && projectRef !== '_',
     ...options,
   })
 

@@ -4,14 +4,12 @@ import { createElement } from 'react'
 
 import type { ProductMenuGroup } from '@/components/ui/ProductMenu/ProductMenu.types'
 import { useIsFeatureEnabled } from '@/hooks/misc/useIsFeatureEnabled'
-import { IS_PLATFORM } from '@/lib/constants'
 import { SHORTCUT_IDS } from '@/state/shortcuts/registry'
 
 const ExternalLinkIcon = createElement(ArrowUpRightIcon, { strokeWidth: 1, className: 'h-4 w-4' })
 
 export interface GenerateAuthMenuOptions {
   ref?: string
-  isPlatform: boolean
   showOverview: boolean
   features: {
     signInProviders: boolean
@@ -25,7 +23,7 @@ export interface GenerateAuthMenuOptions {
 }
 
 export function generateAuthMenu(options: GenerateAuthMenuOptions): ProductMenuGroup[] {
-  const { ref, isPlatform, showOverview, features } = options
+  const { ref, showOverview, features } = options
   const passkeysInMenu = Boolean(features.passkeys)
   const baseUrl = `/project/${ref}/auth`
 
@@ -51,20 +49,16 @@ export function generateAuthMenu(options: GenerateAuthMenuOptions): ProductMenuG
           items: [],
           shortcutId: SHORTCUT_IDS.NAV_AUTH_USERS,
         },
-        ...(isPlatform
-          ? [
-              {
-                name: 'OAuth Apps',
-                key: 'oauth-apps',
-                url: `${baseUrl}/oauth-apps`,
-                items: [],
-                shortcutId: SHORTCUT_IDS.NAV_AUTH_OAUTH_APPS,
-              },
-            ]
-          : []),
+        {
+          name: 'OAuth Apps',
+          key: 'oauth-apps',
+          url: `${baseUrl}/oauth-apps`,
+          items: [],
+          shortcutId: SHORTCUT_IDS.NAV_AUTH_OAUTH_APPS,
+        },
       ],
     },
-    ...(features.emails && isPlatform
+    ...(features.emails
       ? [
           {
             title: 'Notifications',
@@ -96,111 +90,107 @@ export function generateAuthMenu(options: GenerateAuthMenuOptions): ProductMenuG
           items: [],
           // shortcutId: SHORTCUT_IDS.NAV_AUTH_POLICIES,
         },
-        ...(isPlatform
+        ...(features.signInProviders
           ? [
-              ...(features.signInProviders
-                ? [
-                    {
-                      name: 'Sign In / Providers',
-                      key: 'sign-in-up',
-                      pages: ['providers', 'third-party'],
-                      url: `${baseUrl}/providers`,
-                      items: [],
-                      shortcutId: SHORTCUT_IDS.NAV_AUTH_SIGN_IN,
-                    },
-                  ]
-                : []),
-              ...(passkeysInMenu
-                ? [
-                    {
-                      name: 'Passkeys',
-                      key: 'passkeys',
-                      url: `${baseUrl}/passkeys`,
-                      label: 'Beta',
-                      shortcutId: SHORTCUT_IDS.NAV_AUTH_PASSKEYS,
-                    },
-                  ]
-                : []),
               {
-                name: 'OAuth Server',
-                key: 'oauth-server',
-                url: `${baseUrl}/oauth-server`,
+                name: 'Sign In / Providers',
+                key: 'sign-in-up',
+                pages: ['providers', 'third-party'],
+                url: `${baseUrl}/providers`,
+                items: [],
+                shortcutId: SHORTCUT_IDS.NAV_AUTH_SIGN_IN,
+              },
+            ]
+          : []),
+        ...(passkeysInMenu
+          ? [
+              {
+                name: 'Passkeys',
+                key: 'passkeys',
+                url: `${baseUrl}/passkeys`,
                 label: 'Beta',
-                shortcutId: SHORTCUT_IDS.NAV_AUTH_OAUTH_SERVER,
+                shortcutId: SHORTCUT_IDS.NAV_AUTH_PASSKEYS,
               },
+            ]
+          : []),
+        {
+          name: 'OAuth Server',
+          key: 'oauth-server',
+          url: `${baseUrl}/oauth-server`,
+          label: 'Beta',
+          shortcutId: SHORTCUT_IDS.NAV_AUTH_OAUTH_SERVER,
+        },
+        {
+          name: 'Sessions',
+          key: 'sessions',
+          url: `${baseUrl}/sessions`,
+          items: [],
+          shortcutId: SHORTCUT_IDS.NAV_AUTH_SESSIONS,
+        },
+        ...(features.rateLimits
+          ? [
               {
-                name: 'Sessions',
-                key: 'sessions',
-                url: `${baseUrl}/sessions`,
+                name: 'Rate Limits',
+                key: 'rate-limits',
+                url: `${baseUrl}/rate-limits`,
                 items: [],
-                shortcutId: SHORTCUT_IDS.NAV_AUTH_SESSIONS,
+                shortcutId: SHORTCUT_IDS.NAV_AUTH_RATE_LIMITS,
               },
-              ...(features.rateLimits
-                ? [
-                    {
-                      name: 'Rate Limits',
-                      key: 'rate-limits',
-                      url: `${baseUrl}/rate-limits`,
-                      items: [],
-                      shortcutId: SHORTCUT_IDS.NAV_AUTH_RATE_LIMITS,
-                    },
-                  ]
-                : []),
-              ...(features.multiFactor
-                ? [
-                    {
-                      name: 'Multi-Factor',
-                      key: 'mfa',
-                      url: `${baseUrl}/mfa`,
-                      items: [],
-                      shortcutId: SHORTCUT_IDS.NAV_AUTH_MFA,
-                    },
-                  ]
-                : []),
+            ]
+          : []),
+        ...(features.multiFactor
+          ? [
               {
-                name: 'URL Configuration',
-                key: 'url-configuration',
-                url: `${baseUrl}/url-configuration`,
+                name: 'Multi-Factor',
+                key: 'mfa',
+                url: `${baseUrl}/mfa`,
                 items: [],
-                shortcutId: SHORTCUT_IDS.NAV_AUTH_URL_CONFIGURATION,
+                shortcutId: SHORTCUT_IDS.NAV_AUTH_MFA,
               },
-              ...(features.attackProtection
-                ? [
-                    {
-                      name: 'Attack Protection',
-                      key: 'protection',
-                      url: `${baseUrl}/protection`,
-                      items: [],
-                      shortcutId: SHORTCUT_IDS.NAV_AUTH_PROTECTION,
-                    },
-                  ]
-                : []),
+            ]
+          : []),
+        {
+          name: 'URL Configuration',
+          key: 'url-configuration',
+          url: `${baseUrl}/url-configuration`,
+          items: [],
+          shortcutId: SHORTCUT_IDS.NAV_AUTH_URL_CONFIGURATION,
+        },
+        ...(features.attackProtection
+          ? [
               {
-                name: 'Auth Hooks',
-                key: 'hooks',
-                url: `${baseUrl}/hooks`,
+                name: 'Attack Protection',
+                key: 'protection',
+                url: `${baseUrl}/protection`,
                 items: [],
-                label: 'Beta',
-                shortcutId: SHORTCUT_IDS.NAV_AUTH_HOOKS,
+                shortcutId: SHORTCUT_IDS.NAV_AUTH_PROTECTION,
               },
+            ]
+          : []),
+        {
+          name: 'Auth Hooks',
+          key: 'hooks',
+          url: `${baseUrl}/hooks`,
+          items: [],
+          label: 'Beta',
+          shortcutId: SHORTCUT_IDS.NAV_AUTH_HOOKS,
+        },
+        {
+          name: 'Audit Logs',
+          key: 'audit-logs',
+          url: `${baseUrl}/audit-logs`,
+          items: [],
+          shortcutId: SHORTCUT_IDS.NAV_AUTH_AUDIT_LOGS,
+        },
+        ...(features.performance
+          ? [
               {
-                name: 'Audit Logs',
-                key: 'audit-logs',
-                url: `${baseUrl}/audit-logs`,
+                name: 'Performance',
+                key: 'performance',
+                url: `${baseUrl}/performance`,
                 items: [],
-                shortcutId: SHORTCUT_IDS.NAV_AUTH_AUDIT_LOGS,
+                shortcutId: SHORTCUT_IDS.NAV_AUTH_PERFORMANCE,
               },
-              ...(features.performance
-                ? [
-                    {
-                      name: 'Performance',
-                      key: 'performance',
-                      url: `${baseUrl}/performance`,
-                      items: [],
-                      shortcutId: SHORTCUT_IDS.NAV_AUTH_PERFORMANCE,
-                    },
-                  ]
-                : []),
             ]
           : []),
       ],
@@ -231,7 +221,6 @@ export const useGenerateAuthMenu = (): ProductMenuGroup[] => {
 
   return generateAuthMenu({
     ref,
-    isPlatform: IS_PLATFORM,
     showOverview,
     features: {
       signInProviders: authenticationSignInProviders,

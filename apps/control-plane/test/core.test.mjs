@@ -718,3 +718,22 @@ test('Studio can write the functions folder; the runtime mount is unchanged', as
   assert(compose.services.studio.volumes.includes('./volumes/functions:/app/edge-functions:z'))
   assert(compose.services.functions.volumes.includes('./volumes/functions:/home/deno/functions:z'))
 })
+
+test('Studio saves Auth settings to a folder the Auth server reloads from', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { renderCompose } = await import('../src/templates.mjs')
+  const compose = parse(
+    renderCompose(
+      await readFile(new URL('../../../docker/docker-compose.yml', import.meta.url), 'utf8'),
+      { id: 'p0123456789abcdef01234567', memory_mb: 4096, cpus: 2, release: 'test' }
+    )
+  )
+  const { auth, studio } = compose.services
+  assert.deepEqual(auth.command, ['auth', '--config-dir', '/etc/auth.d'])
+  assert(auth.volumes.includes('./volumes/auth-config:/etc/auth.d:ro,z'))
+  assert(studio.volumes.includes('./volumes/auth-config:/app/auth-config:z'))
+  assert.equal(studio.environment.AUTH_CONFIG_MANAGEMENT_FOLDER, '/app/auth-config')
+  assert.equal(studio.environment.GOTRUE_SITE_URL, '${SITE_URL}')
+  for (const secret of ['GOTRUE_DB_DATABASE_URL', 'GOTRUE_JWT_SECRET', 'GOTRUE_JWT_KEYS'])
+    assert.equal(studio.environment[secret], undefined)
+})

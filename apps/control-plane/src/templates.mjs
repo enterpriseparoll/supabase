@@ -56,8 +56,27 @@ export function renderCompose(source, project, { local = false } = {}) {
       ? volume.replace(/:ro,/, ':').replace(/:ro$/, '')
       : volume
   )
+  // Auth settings from Studio: Studio writes settings.json to a shared folder, and the
+  // Auth server watches it (--config-dir) and reloads without a restart. Studio gets the
+  // Auth server's own settings (minus database and signing secrets) to show what's in effect.
+  compose.services.auth.command = ['auth', '--config-dir', '/etc/auth.d']
+  compose.services.auth.volumes = [
+    ...(compose.services.auth.volumes ?? []),
+    './volumes/auth-config:/etc/auth.d:ro,z',
+  ]
+  compose.services.studio.volumes.push('./volumes/auth-config:/app/auth-config:z')
+  const hiddenAuthSettings = new Set([
+    'GOTRUE_DB_DATABASE_URL',
+    'GOTRUE_JWT_SECRET',
+    'GOTRUE_JWT_KEYS',
+  ])
+  for (const [key, value] of Object.entries(compose.services.auth.environment ?? {}))
+    if (key.startsWith('GOTRUE_') && !hiddenAuthSettings.has(key))
+      compose.services.studio.environment[key] = value
   // Studio shows the tenant user and, locally, the published pooler in Connect.
   Object.assign(compose.services.studio.environment, {
+    AUTH_CONFIG_MANAGEMENT_FOLDER: '/app/auth-config',
+    API_EXTERNAL_URL: '${API_EXTERNAL_URL}',
     POOLER_TENANT_ID: '${POOLER_TENANT_ID}',
     POOLER_PUBLIC_HOST: '${POOLER_PUBLIC_HOST}',
     POOLER_PUBLIC_PORT: '${POOLER_PUBLIC_PORT}',
