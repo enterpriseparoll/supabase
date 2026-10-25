@@ -221,6 +221,7 @@ test('Studio handoffs are single-use, project-bound, and revoked with membership
   }
   const handoff = await fetch(`${base}/internal/studio-auth`, { headers, redirect: 'manual' })
   assert.equal(handoff.status, 303)
+  assert.equal(handoff.headers.get('location'), `${ticketUrl.origin}/`)
   const cookie = handoff.headers.get('set-cookie').split(';')[0]
   assert(cookie.startsWith('__Host-studio='))
   assert.equal(
@@ -500,6 +501,7 @@ test('local mode signs in with the generated token over plain HTTP', async () =>
       },
     })
     assert.equal(studio.status, 303)
+    assert.equal(studio.headers.get('location'), `${handoff.origin}/`)
     const studioCookie = studio.headers.get('set-cookie').split(';')[0]
     assert.match(studioCookie, /^studio=/)
     const check = (host) =>

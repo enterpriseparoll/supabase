@@ -164,8 +164,10 @@ export function managementServer(pool, config, oidc) {
               )
               await audit(db, entry.subject, 'studio.session.created', id)
             })
+            // Absolute: Traefik resolves a relative Location from forward auth against
+            // the auth service address (http://api:3000), not the Studio host.
             return send(response, 303, undefined, {
-              Location: '/',
+              Location: `${studioOrigin}/`,
               'Set-Cookie': setCookie('studio', raw),
             })
           }
