@@ -63,6 +63,9 @@ services:
     <<: *runtime
     read_only: true
     tmpfs: [/tmp]
+    volumes:
+      # Backup downloads written by the worker; served read-only.
+      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/exports:${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/exports:ro
     depends_on:
       migrate: { condition: service_completed_successfully }
     networks: [control, edge]

@@ -47,6 +47,14 @@ bucket (for example `s3:https://s3.example.com/bucket/platform`, with
 repository password is `secrets/restic_password`; without it backups cannot be
 read.
 
+Every backup also has a **Download** button (owners and operators). It gives the
+same file as Supabase Cloud's backup download: `db_cluster-DD-MM-YYYY@HH-MM-SS.backup.gz`,
+a gzipped `pg_dumpall` of all roles (without passwords) and databases, without
+Storage files. Restore it anywhere with
+`gunzip -c db_cluster-….backup.gz | psql "postgresql://postgres:…@host:port/postgres"`.
+Downloads are audited and kept under `/srv/supabase-platform/exports` until the
+backup is removed by retention. Backups made before this feature have no download.
+
 Restoring takes a safety backup, loads the chosen backup into a new database, and
 swaps it in only after it loads completely. The previous database is kept as
 `postgres_before_restore` until the next restore.

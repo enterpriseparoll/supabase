@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
-import { readFile } from 'node:fs/promises'
+import { open, readFile } from 'node:fs/promises'
+import { pipeline } from 'node:stream/promises'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { configuration } from './config.mjs'
@@ -18,6 +19,7 @@ import {
 } from './core.mjs'
 import {
   addDomain,
+  backupDownload,
   createProject,
   listProjects,
   projectAccess,
@@ -400,6 +402,32 @@ export function managementServer(pool, config, oidc) {
           })
           return send(response, 200, { ok: true })
         }
+        const download = path.match(/^\/api\/projects\/([^/]+)\/backups\/([^/]+)\/download$/)
+        if (download && request.method === 'GET') {
+          // Downloads are reads but expose all data, so they share the sensitive budget.
+          invariant(
+            limits.sensitive.take(subject),
+            429,
+            'Too many requests. Wait a minute and try again.'
+          )
+          const file = await backupDownload(pool, config, subject, download[1], download[2])
+          let handle
+          try {
+            handle = await open(file.path, 'r')
+          } catch {
+            throw new HttpError(404, 'The backup file is no longer on the server')
+          }
+          const { size } = await handle.stat()
+          response.writeHead(200, {
+            'Content-Type': 'application/gzip',
+            'Content-Length': size,
+            'Content-Disposition': `attachment; filename="${file.name}"`,
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+          })
+          await pipeline(handle.createReadStream(), response)
+          return
+        }
         const match = path.match(
           /^\/api\/projects\/([^/]+)(?:\/(secrets|operations|backups|domains|studio-ticket|members|insights|stats|schema-snapshots|backup-settings))?$/
         )
@@ -457,7 +485,7 @@ export function managementServer(pool, config, oidc) {
               operations:
                 'SELECT id,kind,state,attempts,error_code,created_at,finished_at FROM control.operations WHERE project_id=$1 ORDER BY created_at DESC LIMIT 100',
               backups:
-                'SELECT id,snapshot,release,created_at,size_bytes,trigger FROM control.backups WHERE project_id=$1 ORDER BY created_at DESC LIMIT 100',
+                'SELECT id,snapshot,release,created_at,size_bytes,trigger,download_bytes FROM control.backups WHERE project_id=$1 ORDER BY created_at DESC LIMIT 100',
               domains:
                 'SELECT domain,verification_token,verified_at FROM control.domains WHERE project_id=$1 ORDER BY domain',
             }

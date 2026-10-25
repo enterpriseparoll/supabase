@@ -9,11 +9,18 @@ import {
   stat,
   lstat,
   statfs,
+  chown,
+  chmod,
+  copyFile,
 } from 'node:fs/promises'
-import { resolve, sep } from 'node:path'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
+import { createGzip } from 'node:zlib'
+import { dirname, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { Resolver } from 'node:dns/promises'
 import { parse, stringify } from 'yaml'
+import { backupDownloadPath, clusterDumpArgs } from './backup-files.mjs'
 import { hash, invariant, projectId, unseal } from './core.mjs'
 import {
   collectInsights,
@@ -510,6 +517,8 @@ export class Infrastructure {
           'globals.sql',
           ['pg_dumpall', '-h', '127.0.0.1', '-U', 'supabase_admin', '--globals-only'],
         ],
+        // Same format as Supabase Cloud's backup download; offered as a download.
+        ['db_cluster.backup', clusterDumpArgs()],
       ]) {
         const handle = await open(`${staging}/${file}`, 'w', 0o600)
         try {
@@ -522,6 +531,12 @@ export class Infrastructure {
           await handle.close()
         }
       }
+      await pipeline(
+        createReadStream(`${staging}/db_cluster.backup`),
+        createGzip(),
+        createWriteStream(`${staging}/db_cluster.backup.gz`, { mode: 0o600 })
+      )
+      await rm(`${staging}/db_cluster.backup`)
       await cp(`${this.directory(project.id)}/volumes/storage`, `${staging}/storage`, {
         recursive: true,
       })
@@ -549,23 +564,57 @@ export class Infrastructure {
         .map((line) => JSON.parse(line))
         .find((row) => row.message_type === 'summary')
       invariant(summary?.snapshot_id, 500, 'BACKUP_SNAPSHOT_MISSING')
-      await this.db.query(
-        'INSERT INTO control.backups(id,project_id,snapshot,source_path,release,size_bytes,trigger) VALUES($1,$2,$3,$4,$5,$6,$7)',
-        [
-          id,
-          project.id,
-          summary.snapshot_id,
-          staging,
-          project.release,
-          summary.total_bytes_processed ?? null,
-          trigger,
-        ]
-      )
+      // The download copy is a convenience; the backup stays valid without it.
+      const download = await this.publishDownload(
+        project,
+        id,
+        `${staging}/db_cluster.backup.gz`
+      ).catch((error) => {
+        console.error(
+          JSON.stringify({ event: 'backup.download.failed', project: project.id, backup: id })
+        )
+        if (this.config.local) console.error(error)
+        return null
+      })
+      try {
+        await this.db.query(
+          'INSERT INTO control.backups(id,project_id,snapshot,source_path,release,size_bytes,trigger,download_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+          [
+            id,
+            project.id,
+            summary.snapshot_id,
+            staging,
+            project.release,
+            summary.total_bytes_processed ?? null,
+            trigger,
+            download,
+          ]
+        )
+      } catch (error) {
+        await rm(backupDownloadPath(this.config.dataRoot, project.id, id), { force: true })
+        throw error
+      }
       await this.applyRetention(project)
     } finally {
       await rm(staging, { recursive: true, force: true })
       if (stopped) await this.compose(project, ['stop', 'db'])
     }
+  }
+  // Copies the cluster dump to where the API (a different, unprivileged user) can
+  // serve it read-only. Returns its size in bytes.
+  async publishDownload(project, backupId, source) {
+    const target = backupDownloadPath(this.config.dataRoot, project.id, backupId)
+    const uid = this.config.apiUid ?? 1000
+    for (const directory of [dirname(dirname(target)), dirname(target)]) {
+      await mkdir(directory, { recursive: true, mode: 0o700 })
+      await chown(directory, uid, uid)
+      await chmod(directory, 0o700)
+    }
+    await copyFile(source, `${target}.partial`)
+    await chown(`${target}.partial`, uid, uid)
+    await chmod(`${target}.partial`, 0o400)
+    await rename(`${target}.partial`, target)
+    return (await stat(target)).size
   }
   // Keeps the newest `backup_retention` backups (pre-restore safety copies count too).
   async applyRetention(
@@ -584,6 +633,8 @@ export class Infrastructure {
     await this.db.query('DELETE FROM control.backups WHERE id = ANY($1::uuid[])', [
       expired.map((row) => row.id),
     ])
+    for (const row of expired)
+      await rm(backupDownloadPath(this.config.dataRoot, project.id, row.id), { force: true })
   }
   // Rebuilds the project database from a backup. A safety backup is taken first, and
   // the Storage directory being replaced is kept beside the restored one.

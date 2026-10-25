@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { diffLines } from './insights.mjs'
+import { backupDownloadName, backupDownloadPath } from './backup-files.mjs'
 import { audit, roleFor, transaction } from './database.mjs'
 import {
   allocationInput,
@@ -394,5 +395,24 @@ export async function updateBackupSettings(pool, actor, id, input) {
     )
     await audit(db, actor, 'project.backup_settings.updated', id, { intervalHours, retention })
     return { intervalHours, retention }
+  })
+}
+
+// Full-cluster SQL dump of one backup. It contains every row, so it needs the same
+// permission as revealing credentials, and every download is audited.
+export async function backupDownload(pool, config, actor, id, backupId) {
+  const path = backupDownloadPath(config.dataRoot, id, backupId)
+  return transaction(pool, async (db) => {
+    await projectAccess(db, actor, id, 'secrets')
+    const backup = (
+      await db.query(
+        'SELECT created_at, download_bytes FROM control.backups WHERE id=$1 AND project_id=$2',
+        [backupId, id]
+      )
+    ).rows[0]
+    invariant(backup, 404, 'Backup not found')
+    invariant(backup.download_bytes !== null, 404, 'This backup has no download')
+    await audit(db, actor, 'project.backup.downloaded', id, { backup: backupId })
+    return { path, name: backupDownloadName(backup.created_at) }
   })
 }

@@ -14,6 +14,11 @@ import { runOne, scheduleBackups } from '../src/worker.mjs'
 import { Infrastructure } from '../src/infrastructure.mjs'
 import { randomUUID } from 'node:crypto'
 import { managementServer } from '../src/server.mjs'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { gzipSync, gunzipSync } from 'node:zlib'
+import { backupDownloadPath } from '../src/backup-files.mjs'
 
 const url = process.env.CONTROL_TEST_DATABASE_URL
 const config = {
@@ -33,6 +38,7 @@ before(async () => {
   )
   assert(new URL(url).pathname.endsWith('_test'), 'Integration database name must end in _test')
   pool = database(url)
+  config.dataRoot = await mkdtemp(join(tmpdir(), 'platform-data-'))
   await pool.query('DROP SCHEMA IF EXISTS control CASCADE')
   await pool.query('DROP TABLE IF EXISTS public.platform_migrations')
   // Like a real install (init-db.sh), the runtime roles exist before migrations run,
@@ -72,6 +78,7 @@ before(async () => {
 after(async () => {
   if (server) await new Promise((resolve) => server.close(resolve))
   await pool?.end()
+  if (config.dataRoot) await rm(config.dataRoot, { recursive: true, force: true })
 })
 test('concurrent project requests reserve capacity and honor idempotency', async () => {
   const [first, second] = await Promise.all([
@@ -943,3 +950,73 @@ test(
     }
   }
 )
+
+test('backup downloads serve the cloud-format dump to permitted users only', async () => {
+  const roomy = { ...config, capacityMb: 1048576, capacityCpus: 1024 }
+  const id = (await createProject(pool, roomy, 'owner', input, 'download-test')).project_id
+  const other = (await createProject(pool, roomy, 'owner', input, 'download-other')).project_id
+  const dump = '--\n-- PostgreSQL database cluster dump\n--\n'
+  const infrastructure = new Infrastructure({ ...config, apiUid: process.getuid() }, pool)
+  const backup = randomUUID()
+  const source = join(config.dataRoot, 'source.backup.gz')
+  await writeFile(source, gzipSync(dump))
+  const size = await infrastructure.publishDownload({ id }, backup, source)
+  assert.equal((await stat(backupDownloadPath(config.dataRoot, id, backup))).mode & 0o777, 0o400)
+  await pool.query(
+    "INSERT INTO control.backups(id,project_id,snapshot,source_path,release,created_at,download_bytes) VALUES($1,$2,'s','/x','test','2026-10-24T20:31:36Z',$3)",
+    [backup, id, size]
+  )
+  // Operators may download too; a fresh identity keeps this test's rate-limit budget.
+  const operatorCookie = token()
+  await pool.query("INSERT INTO control.members(subject,role) VALUES('downloader','operator')")
+  await pool.query(
+    "INSERT INTO control.sessions(token_hash,subject,expires_at) VALUES($1,'downloader',now()+interval '1 hour')",
+    [hash(operatorCookie)]
+  )
+  const fetchAs = (cookie, path) =>
+    fetch(`${base}${path}`, { headers: { Cookie: `__Host-platform=${cookie}` } })
+  const response = await fetchAs(operatorCookie, `/api/projects/${id}/backups/${backup}/download`)
+  assert.equal(response.status, 200)
+  assert.equal(
+    response.headers.get('content-disposition'),
+    'attachment; filename="db_cluster-24-10-2026@20-31-36.backup.gz"'
+  )
+  assert.equal(gunzipSync(Buffer.from(await response.arrayBuffer())).toString(), dump)
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS count FROM control.audit WHERE action='project.backup.downloaded' AND project_id=$1",
+        [id]
+      )
+    ).rows[0].count,
+    1
+  )
+  // Viewers cannot download; another project's path cannot reach this backup.
+  assert.equal(
+    (await fetchAs(viewerCookie, `/api/projects/${id}/backups/${backup}/download`)).status,
+    403
+  )
+  assert.equal(
+    (await fetchAs(operatorCookie, `/api/projects/${other}/backups/${backup}/download`)).status,
+    404
+  )
+  assert.equal(
+    (await fetchAs(operatorCookie, `/api/projects/${id}/backups/..%2F..%2Fsecrets/download`))
+      .status,
+    400
+  )
+  // Backups made before downloads existed report that clearly.
+  const older = randomUUID()
+  await pool.query(
+    "INSERT INTO control.backups(id,project_id,snapshot,source_path,release) VALUES($1,$2,'s2','/x','test')",
+    [older, id]
+  )
+  const missing = await fetchAs(operatorCookie, `/api/projects/${id}/backups/${older}/download`)
+  assert.equal(missing.status, 404)
+  assert.equal((await missing.json()).error, 'This backup has no download')
+  // Retention removes the downloadable copy together with the backup.
+  await infrastructure.applyRetention({ id, backup_retention: 1 }, async () => {})
+  await assert.rejects(readFile(backupDownloadPath(config.dataRoot, id, backup)), {
+    code: 'ENOENT',
+  })
+})

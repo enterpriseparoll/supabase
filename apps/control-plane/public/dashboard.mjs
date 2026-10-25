@@ -518,7 +518,7 @@ async function renderBackups(project, root) {
   const list = section(
     root,
     'Backups',
-    'Restoring replaces the database and Storage files. A safety backup is taken first, and the previous database is kept on the server until the next restore.'
+    'Download gives the same file as Supabase Cloud: a gzipped SQL dump of all roles and databases, without passwords or Storage files. Restoring replaces the database and Storage files. A safety backup is taken first, and the previous database is kept on the server until the next restore.'
   )
   if (!backups.length) list.append(element('p', 'No backups yet.', 'text-sm text-subtle'))
   else
@@ -531,9 +531,7 @@ async function renderBackups(project, root) {
             row.trigger
           ] ?? row.trigger,
           formatBytes(row.size_bytes),
-          project.role === 'owner'
-            ? button('Restore', () => confirm(project, 'restore', { backupId: row.id }))
-            : '',
+          backupActions(project, row),
         ])
       )
     )
@@ -551,6 +549,34 @@ async function renderBackups(project, root) {
       )
     )
   }
+}
+
+function backupActions(project, row) {
+  const actions = element('div', '', 'flex flex-wrap gap-2')
+  if (['owner', 'operator'].includes(project.role) && row.download_bytes !== null)
+    actions.append(
+      button(`Download (${formatBytes(row.download_bytes)})`, () => downloadBackup(project, row))
+    )
+  if (project.role === 'owner')
+    actions.append(button('Restore', () => confirm(project, 'restore', { backupId: row.id })))
+  return actions.childElementCount ? actions : ''
+}
+async function downloadBackup(project, row) {
+  const response = await fetch(`/api/projects/${project.id}/backups/${row.id}/download`, {
+    credentials: 'same-origin',
+  })
+  if (!response.ok) {
+    const value = await response.json().catch(() => ({}))
+    throw new Error(value.error ?? 'Download failed')
+  }
+  const name =
+    /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ??
+    'db_cluster.backup.gz'
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(await response.blob())
+  link.download = name
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(link.href), 60000)
 }
 
 // ---- Migration history ----

@@ -42,6 +42,8 @@ export async function configuration(env = process.env) {
     500,
     'Invalid PLATFORM_STUDIO_IMAGE'
   )
+  const apiUid = Number(env.API_UID ?? 1000)
+  invariant(Number.isInteger(apiUid) && apiUid > 0, 500, 'Invalid API_UID')
   return {
     studioImage,
     databaseUrl: await secret('DATABASE_URL'),
@@ -68,5 +70,7 @@ export async function configuration(env = process.env) {
     capacityCpus: Number(env.HOST_CAPACITY_CPUS ?? 3),
     backupHours: Number(env.BACKUP_INTERVAL_HOURS ?? 24),
     insightsMinutes: Number(env.INSIGHTS_INTERVAL_MINUTES ?? 5),
+    // The API image runs as the node user; backup downloads are owned by it.
+    apiUid,
   }
 }

@@ -413,3 +413,28 @@ test('insight collection degrades gracefully when optional pieces are missing', 
     deadlocks: 0,
   })
 })
+
+test('backup downloads use the cloud file name and stay inside the project folder', async () => {
+  const { backupDownloadName, backupDownloadPath, clusterDumpArgs } = await import(
+    '../src/backup-files.mjs'
+  )
+  assert.equal(
+    backupDownloadName('2026-10-24T20:31:36.000Z'),
+    'db_cluster-24-10-2026@20-31-36.backup.gz'
+  )
+  const id = '5e1f88ec-fec1-407e-b5a3-bb9c2cdcd082'
+  assert.equal(
+    backupDownloadPath('/srv/data', 'p4eb6d2ee001a0adebc7ac563', id),
+    `/srv/data/exports/p4eb6d2ee001a0adebc7ac563/${id}.backup.gz`
+  )
+  for (const bad of ['../secrets', `${id}/..`, '', null])
+    assert.throws(() => backupDownloadPath('/srv/data', 'p4eb6d2ee001a0adebc7ac563', bad), {
+      status: 400,
+    })
+  assert.throws(() => backupDownloadPath('/srv/data', '../x', id))
+  const args = clusterDumpArgs()
+  assert.equal(args[0], 'pg_dumpall')
+  assert(args.includes('--no-role-passwords'))
+  for (const name of ['_supabase', 'postgres_before_restore', 'postgres_restoring'])
+    assert(args.includes(`--exclude-database=${name}`))
+})

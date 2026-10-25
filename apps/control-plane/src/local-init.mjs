@@ -11,6 +11,8 @@ if (!Number.isInteger(port) || port <= 0 || port >= 65536) throw new Error('Inva
 
 await mkdir(`${root}/projects`, { recursive: true, mode: 0o700 })
 await mkdir(`${root}/routes`, { recursive: true, mode: 0o755 })
+// Backup downloads: written by the worker, read by the API (uid 1000).
+await mkdir(`${root}/exports`, { recursive: true, mode: 0o755 })
 // Containers with different users (postgres, node) read these files. This is
 // acceptable only inside a single-user Docker Desktop VM, never on a server.
 await mkdir(`${root}/secrets`, { recursive: true, mode: 0o755 })
