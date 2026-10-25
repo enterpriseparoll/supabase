@@ -61,6 +61,15 @@ export async function runOne(pool, config, infrastructure) {
         return { ...row, attempts: row.attempts + 1 }
       })
       if (!operation) continue
+      console.log(
+        JSON.stringify({
+          event: 'operation.started',
+          operation: operation.id,
+          project: operation.project_id,
+          kind: operation.kind,
+          attempt: operation.attempts,
+        })
+      )
       try {
         invariant(
           !(['restore', 'upgrade', 'rollback'].includes(operation.kind) && operation.attempts > 1),
@@ -140,6 +149,9 @@ export async function runOne(pool, config, infrastructure) {
             operation: operation.id,
             project: operation.project_id,
             code: errorCode,
+            step: error.step,
+            // Local mode only: subprocess output can contain credentials on servers.
+            ...(config.local ? { detail: error.stderr || error.message } : {}),
           })
         )
         const retry =
