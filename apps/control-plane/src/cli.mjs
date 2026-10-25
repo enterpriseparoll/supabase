@@ -25,6 +25,14 @@ try {
     })
   } else throw new Error('Usage: node src/cli.mjs migrate | bootstrap-owner <OIDC-subject>')
   console.log('Completed')
+} catch (error) {
+  // The control database keeps the passwords it was created with. New secrets mean
+  // the data folder was replaced (for example, Docker Desktop cleared it).
+  if (error.code === '28P01')
+    console.error(
+      'The control database rejected the platform password. The secrets folder was recreated, so it no longer matches the existing database (and project data stored beside it is likely gone). See README "Local mode" to reset.'
+    )
+  throw error
 } finally {
   await pool.end()
 }

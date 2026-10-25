@@ -27,9 +27,11 @@ Settings (set in the shell or a `.env` file next to `compose.local.yml`):
 - `HOST_CAPACITY_MB` / `HOST_CAPACITY_CPUS` (defaults `8192` / `4`): budget for all
   projects together. Each project needs at least 2048 MiB; keep the total below
   the memory Docker Desktop is allowed to use.
-- `PLATFORM_DATA_ROOT` (default `/srv/supabase-platform`): where secrets, routes,
-  and project data live inside the Docker engine's filesystem (the Docker Desktop
-  VM), not in this repository.
+- `PLATFORM_DATA_ROOT` (default `/var/lib/docker/supabase-platform`): where
+  secrets, routes, backups, and project data live inside the Docker engine's
+  filesystem, not in this repository. It must be on Docker's data disk: Docker
+  Desktop recreates the rest of its VM, including `/srv`, every time it restarts,
+  which deletes everything stored there.
 
 ### Backups, migrations, schema history, and performance
 
@@ -40,8 +42,8 @@ the API only serves what was collected.
 
 Backups run online (pg_dump plus Storage files) on each project's own schedule
 (daily by default, keeping 7). Local mode stores them, encrypted and deduplicated,
-in a restic repository at `/srv/supabase-platform/backups/restic` inside the Docker
-VM. That copy is lost with the VM, so set `RESTIC_REPOSITORY` to an S3-compatible
+in a restic repository at `<PLATFORM_DATA_ROOT>/backups/restic` on Docker's data
+disk. That copy is lost if Docker Desktop's data is reset or uninstalled, so set `RESTIC_REPOSITORY` to an S3-compatible
 bucket (for example `s3:https://s3.example.com/bucket/platform`, with
 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) to keep copies off this machine. The
 repository password is `secrets/restic_password`; without it backups cannot be
@@ -52,7 +54,7 @@ same file as Supabase Cloud's backup download: `db_cluster-DD-MM-YYYY@HH-MM-SS.b
 a gzipped `pg_dumpall` of all roles (without passwords) and databases, without
 Storage files. Restore it anywhere with
 `gunzip -c db_cluster-….backup.gz | psql "postgresql://postgres:…@host:port/postgres"`.
-Downloads are audited and kept under `/srv/supabase-platform/exports` until the
+Downloads are audited and kept under `<PLATFORM_DATA_ROOT>/exports` until the
 backup is removed by retention. Backups made before this feature have no download.
 
 Restoring takes a safety backup, loads the chosen backup into a new database, and

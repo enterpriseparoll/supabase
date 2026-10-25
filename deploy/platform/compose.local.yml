@@ -5,8 +5,9 @@
 #   docker compose -f compose.local.yml up -d --build
 #   docker compose -f compose.local.yml logs local-init   # dashboard URL + sign-in token
 #
-# Data lives under PLATFORM_DATA_ROOT inside the Docker engine's filesystem (the
-# Docker Desktop VM on Windows/macOS), not in this repository.
+# Data lives under PLATFORM_DATA_ROOT inside the Docker engine's filesystem, not in
+# this repository. The default is on Docker's own data disk, next to its images and
+# volumes: Docker Desktop discards other VM paths (such as /srv) when it restarts.
 name: supabase-platform-local
 
 x-runtime: &runtime
@@ -26,14 +27,14 @@ x-runtime: &runtime
     LOCAL_ADMIN_TOKEN_FILE: /run/secrets/local_admin_token
     MASTER_KEY_FILE: /run/secrets/master_key
     DATABASE_URL_FILE: /run/secrets/database_url_api
-    PLATFORM_DATA_ROOT: ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}
-    PLATFORM_ROUTE_ROOT: ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/routes
+    PLATFORM_DATA_ROOT: ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}
+    PLATFORM_ROUTE_ROOT: ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}/routes
     HOST_CAPACITY_MB: ${HOST_CAPACITY_MB:-8192}
     HOST_CAPACITY_CPUS: ${HOST_CAPACITY_CPUS:-4}
     # Optional Studio build with the cross-project switcher (see README).
     PLATFORM_STUDIO_IMAGE: ${PLATFORM_STUDIO_IMAGE:-}
   volumes:
-    - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets:/run/secrets:ro
+    - ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}/secrets:/run/secrets:ro
 
 services:
   local-init:
@@ -42,7 +43,7 @@ services:
     user: '0:0'
     command: [node, src/local-init.mjs]
     volumes:
-      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}:${PLATFORM_DATA_ROOT:-/srv/supabase-platform}
+      - ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}:${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}
     network_mode: none
 
   control-db:
@@ -55,7 +56,7 @@ services:
     volumes:
       - control-db:/var/lib/postgresql/data
       - ./init-db.sh:/docker-entrypoint-initdb.d/10-platform.sh:ro
-      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets:/run/secrets:ro
+      - ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}/secrets:/run/secrets:ro
     depends_on:
       local-init: { condition: service_completed_successfully }
     networks: [control]
@@ -84,9 +85,9 @@ services:
     read_only: true
     tmpfs: [/tmp]
     volumes:
-      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets:/run/secrets:ro
+      - ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}/secrets:/run/secrets:ro
       # Backup downloads written by the worker; served read-only.
-      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/exports:${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/exports:ro
+      - ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}/exports:${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}/exports:ro
     depends_on:
       migrate: { condition: service_completed_successfully }
     networks: [control, edge]
@@ -116,13 +117,13 @@ services:
       PLATFORM_IMAGE: supabase-platform:local
       # Encrypted, deduplicated backups inside the Docker VM. Point this at an
       # S3-compatible bucket (s3:https://...) to keep copies off this machine.
-      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-/srv/supabase-platform/backups/restic}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}/backups/restic}
       RESTIC_PASSWORD_FILE: /run/secrets/restic_password
       INSIGHTS_INTERVAL_MINUTES: ${INSIGHTS_INTERVAL_MINUTES:-5}
     volumes:
-      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/secrets:/run/secrets:ro
+      - ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}/secrets:/run/secrets:ro
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}:${PLATFORM_DATA_ROOT:-/srv/supabase-platform}
+      - ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}:${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}
     depends_on:
       migrate: { condition: service_completed_successfully }
     networks: [control, worker-egress]
@@ -141,7 +142,7 @@ services:
       - --log.level=ERROR
     ports: ['127.0.0.1:${LOCAL_PORT:-8090}:80']
     volumes:
-      - ${PLATFORM_DATA_ROOT:-/srv/supabase-platform}/routes:/routes:ro
+      - ${PLATFORM_DATA_ROOT:-/var/lib/docker/supabase-platform}/routes:/routes:ro
     depends_on:
       local-init: { condition: service_completed_successfully }
     networks: [edge]
