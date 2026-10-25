@@ -1109,3 +1109,57 @@ test('migration checksums ignore line endings but catch real edits', async () =>
     await set(hash(sql))
   }
 })
+test('usage totals every accessible project and hides others', async () => {
+  const roomy = { ...config, capacityMb: 1048576, capacityCpus: 1024 }
+  const id = (await createProject(pool, roomy, 'owner', input, 'usage-project')).project_id
+  await pool.query(`UPDATE control.projects SET desired_state='running', metrics=$2 WHERE id=$1`, [
+    id,
+    {
+      disk: { projectBytes: 5000, hostAvailableBytes: 10000 },
+      stats: [{ memory: '1MiB / 2MiB', cpu: '10%' }],
+    },
+  ])
+  await pool.query(
+    `INSERT INTO control.project_insights(project_id,performance,collected_at) VALUES($1,$2,now())
+     ON CONFLICT (project_id) DO UPDATE SET performance=excluded.performance`,
+    [id, { database_bytes: 1234, connections: { total: 7 }, max_connections: 100 }]
+  )
+  const { platformUsage } = await import('../src/usage.mjs')
+  const usage = await platformUsage(pool, roomy, 'owner')
+  const row = usage.projects.find((p) => p.id === id)
+  assert.deepEqual(
+    {
+      memoryUsedBytes: row.memoryUsedBytes,
+      cpuPercent: row.cpuPercent,
+      diskBytes: row.diskBytes,
+      databaseBytes: row.databaseBytes,
+      connections: row.connections,
+    },
+    {
+      memoryUsedBytes: 1048576,
+      cpuPercent: 10,
+      diskBytes: 5000,
+      databaseBytes: 1234,
+      connections: 7,
+    }
+  )
+  assert.equal(usage.capacity.memoryMb, 1048576)
+  // Every project, not one dashboard page.
+  assert.equal(
+    usage.projects.length,
+    (await pool.query("SELECT count(*)::int AS n FROM control.projects WHERE status<>'deleted'"))
+      .rows[0].n
+  )
+  await pool.query(
+    "INSERT INTO control.project_members(project_id,subject,role) VALUES($1,'usage-only','viewer')",
+    [id]
+  )
+  assert.deepEqual(
+    (await platformUsage(pool, roomy, 'usage-only')).projects.map((p) => p.id),
+    [id]
+  )
+  const response = await fetch(`${base}/api/usage`, {
+    headers: { Cookie: `__Host-platform=${ownerCookie}` },
+  })
+  assert.equal(response.status, 200)
+})

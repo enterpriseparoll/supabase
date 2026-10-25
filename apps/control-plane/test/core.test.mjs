@@ -683,3 +683,25 @@ test('access tokens look like Supabase personal access tokens', async () => {
   assert.match(a, ACCESS_TOKEN_PATTERN)
   assert.notEqual(a, newAccessToken())
 })
+
+test('usage parses Docker sizes and sums container statistics', async () => {
+  const { parseBytes, parsePercent, containerUsage } = await import('../src/usage.mjs')
+  assert.equal(parseBytes('43.16MiB'), Math.round(43.16 * 1048576))
+  assert.equal(parseBytes('1.091GiB '), Math.round(1.091 * 1024 ** 3))
+  assert.equal(parseBytes('18.9MB'), 18900000)
+  assert.equal(parseBytes('0B'), 0)
+  assert.equal(parseBytes('n/a'), null)
+  assert.equal(parsePercent('3.51%'), 3.51)
+  assert.equal(parsePercent('--'), null)
+  assert.deepEqual(
+    containerUsage({
+      stats: [
+        { memory: '40MiB / 186MiB', cpu: '3.5%' },
+        { memory: '1GiB / 2GiB', cpu: '1.25%' },
+        { memory: 'garbage', cpu: '--' },
+      ],
+    }),
+    { memoryUsedBytes: 40 * 1048576 + 1024 ** 3, cpuPercent: 4.75 }
+  )
+  assert.deepEqual(containerUsage(undefined), { memoryUsedBytes: null, cpuPercent: null })
+})

@@ -240,9 +240,11 @@
             </section>
             <aside class="hidden w-72 shrink-0 lg:block" aria-labelledby="usage-title">
               <div class="sticky top-8 rounded-lg border border-border p-4">
-                <h2 id="usage-title" class="text-sm font-medium">Platform capacity</h2>
-                <p class="mt-0.5 text-xs text-subtle">Allocated to projects on this host</p>
-                <div id="usage" class="mt-4 space-y-4"></div>
+                <h2 id="usage-title" class="text-sm font-medium">Platform usage</h2>
+                <p class="mt-0.5 text-xs text-subtle">
+                  All your projects on this host. Select a figure to see each project.
+                </p>
+                <div id="usage" class="mt-3 space-y-1"></div>
                 <p class="mt-4 border-t border-border pt-3 text-xs text-subtle">
                   Capacity is set by the HOST_CAPACITY_MB and HOST_CAPACITY_CPUS host settings.
                   Deleted project data is retained for recovery.
@@ -345,6 +347,13 @@
         <button data-close>Close</button>
       </header>
       <div id="detail" class="space-y-5"></div>
+    </dialog>
+    <dialog id="usage-dialog" aria-labelledby="usage-dialog-title">
+      <header class="mb-6 flex items-center justify-between gap-4">
+        <h2 id="usage-dialog-title" class="text-xl font-semibold">Usage</h2>
+        <button data-close>Close</button>
+      </header>
+      <div id="usage-detail" class="space-y-5"></div>
     </dialog>
     <dialog id="tokens-dialog" aria-labelledby="tokens-title">
       <header class="mb-6 flex items-center justify-between gap-4">

@@ -10,6 +10,7 @@ import { authenticate, cookieValue, oidcClient, sessionCookie, verifyOrigin } fr
 import { createAccessToken, listAccessTokens, revokeAccessToken, tokenSubject } from './tokens.mjs'
 import { handleMcpMessage } from './mcp.mjs'
 import { liveRequest } from './live.mjs'
+import { platformUsage } from './usage.mjs'
 import {
   githubStatus,
   handleWebhook,
@@ -387,6 +388,8 @@ export function managementServer(pool, config, oidc) {
           await audit(pool, subject, 'session.revoked')
           return send(response, 200, { ok: true }, { 'Set-Cookie': setCookie('platform', '', 0) })
         }
+        if (path === '/api/usage' && request.method === 'GET')
+          return send(response, 200, await platformUsage(pool, config, subject))
         if (path === '/api/me' && request.method === 'GET')
           return send(response, 200, {
             subject,

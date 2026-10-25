@@ -1856,33 +1856,262 @@ function meter(label, value, ratio) {
   }
   return row
 }
-// The capacity panel sums what is reserved, like the usage card on Supabase Cloud.
+// ---- Usage panel and drill-through ----
+// Like the usage card on Supabase Cloud: each figure opens a breakdown showing how
+// much every project contributes. Totals cover all projects you can access.
+let usage = null
+let usageMetric = 'memory'
+const mib = (value) => `${Math.round(value).toLocaleString()} MiB`
+const cores = (value) => `${Number(value.toFixed(2)).toLocaleString()} CPU`
+const count = (value) => Math.round(value).toLocaleString()
+const usageMetrics = [
+  {
+    key: 'memory',
+    label: 'Memory reserved',
+    tab: 'Overview',
+    format: mib,
+    value: (p) => p.memoryMb,
+    limit: (u) => u.capacity.memoryMb,
+    limitLabel: 'host capacity',
+    description:
+      'Memory set aside for each project. A project can use up to its reservation; change it in the project’s Overview tab.',
+  },
+  {
+    key: 'cpu',
+    label: 'CPU reserved',
+    tab: 'Overview',
+    format: cores,
+    value: (p) => p.cpus,
+    limit: (u) => u.capacity.cpus,
+    limitLabel: 'host capacity',
+    description: 'CPU set aside for each project.',
+  },
+  {
+    key: 'memoryUsed',
+    label: 'Memory in use',
+    tab: 'Overview',
+    format: formatBytes,
+    value: (p) => p.memoryUsedBytes,
+    limit: (u) =>
+      u.projects.filter((p) => p.running).reduce((sum, p) => sum + p.memoryMb * 1048576, 0),
+    limitLabel: 'reserved by running projects',
+    description:
+      'Measured across each running project’s containers at the last check (about every minute).',
+  },
+  {
+    key: 'cpuUsed',
+    label: 'CPU in use',
+    tab: 'Overview',
+    format: cores,
+    value: (p) => (p.cpuPercent === null ? null : p.cpuPercent / 100),
+    limit: (u) => u.capacity.cpus,
+    limitLabel: 'host capacity',
+    description: 'CPU used by each running project’s containers at the last check.',
+  },
+  {
+    key: 'database',
+    label: 'Database size',
+    tab: 'Performance',
+    format: formatBytes,
+    value: (p) => p.databaseBytes,
+    description:
+      'Size of each project’s Postgres database, collected every few minutes. The Performance tab shows the largest tables.',
+  },
+  {
+    key: 'disk',
+    label: 'Disk used',
+    tab: 'Overview',
+    format: formatBytes,
+    value: (p) => p.diskBytes,
+    limit: (u) =>
+      u.capacity.hostAvailableBytes === null
+        ? null
+        : u.projects.reduce((sum, p) => sum + (p.diskBytes ?? 0), 0) +
+          u.capacity.hostAvailableBytes,
+    limitLabel: 'used plus free space on the host',
+    description:
+      'Everything each project stores on disk: database files, Storage files, and functions.',
+  },
+  {
+    key: 'connections',
+    label: 'Database connections',
+    tab: 'Performance',
+    format: count,
+    value: (p) => p.connections,
+    limit: (u) =>
+      u.projects.filter((p) => p.running).reduce((sum, p) => sum + (p.maxConnections ?? 0), 0),
+    limitLabel: 'allowed by running projects',
+    description: 'Open connections to each project’s database at the last collection.',
+  },
+  {
+    key: 'backups',
+    label: 'Latest backup size',
+    tab: 'Backups',
+    format: formatBytes,
+    value: (p) => p.lastBackupBytes,
+    description: 'Size of each project’s most recent backup, before deduplication.',
+  },
+]
+function usageTotals(metric) {
+  const rows = usage.projects.map((project) => ({ project, value: metric.value(project) }))
+  const measured = rows.filter((row) => row.value !== null && row.value !== undefined)
+  const total = measured.reduce((sum, row) => sum + row.value, 0)
+  const limit = metric.limit ? metric.limit(usage) : null
+  return { rows, measured, total, limit: limit || null }
+}
+async function loadUsage() {
+  try {
+    usage = await api('/api/usage')
+  } catch {
+    return
+  }
+  renderUsage()
+  if ($('usage-dialog').open) renderUsageDetail()
+}
 function renderUsage() {
   if (!me) return
-  const rows = [...projects.values()]
-  const running = rows.filter((project) => projectStatus(project).key === 'running').length
-  const meters = []
-  if (me.capacityMb) {
-    const memory = rows.reduce((sum, project) => sum + (project.memoryMb ?? 0), 0)
-    const cpus = rows.reduce((sum, project) => sum + (project.cpus ?? 0), 0)
-    meters.push(
-      meter(
-        'Memory reserved',
-        `${memory.toLocaleString()} / ${me.capacityMb.toLocaleString()} MiB`,
-        memory / me.capacityMb
-      ),
-      meter('CPU reserved', `${cpus} / ${me.capacityCpus} CPU`, cpus / me.capacityCpus)
-    )
+  const panel = $('usage')
+  if (!usage) {
+    panel.replaceChildren(element('p', 'Loading usage…', 'text-xs text-subtle'))
+    return
   }
-  meters.push(
+  const items = []
+  for (const metric of usageMetrics) {
+    const { total, limit, measured } = usageTotals(metric)
+    const value = measured.length
+      ? `${metric.format(total)}${limit ? ` / ${metric.format(limit)}` : ''}`
+      : 'Not measured yet'
+    const item = element('button', '', 'usage-row')
+    item.type = 'button'
+    item.setAttribute('aria-label', `${metric.label}: ${value}. Show each project`)
+    item.append(meter(metric.label, value, limit && measured.length ? total / limit : null))
+    item.addEventListener('click', () => openUsage(metric.key))
+    items.push(item)
+  }
+  const running = usage.projects.filter((p) => p.running).length
+  const projectsItem = element('button', '', 'usage-row')
+  projectsItem.type = 'button'
+  projectsItem.append(
     meter(
       'Projects running',
-      `${running} / ${rows.length}`,
-      rows.length ? running / rows.length : 0
-    ),
-    meter('Projects', String(rows.length), null)
+      `${running} / ${usage.projects.length}`,
+      usage.projects.length ? running / usage.projects.length : 0
+    )
   )
-  $('usage').replaceChildren(...meters)
+  projectsItem.addEventListener('click', () => openUsage('memory'))
+  items.push(projectsItem)
+  panel.replaceChildren(...items)
+}
+function openUsage(key) {
+  usageMetric = key
+  renderUsageDetail()
+  if (!$('usage-dialog').open) $('usage-dialog').showModal()
+}
+function renderUsageDetail() {
+  const metric = usageMetrics.find((item) => item.key === usageMetric) ?? usageMetrics[0]
+  const { rows, total, limit, measured } = usageTotals(metric)
+  $('usage-dialog-title').textContent = metric.label
+  const root = $('usage-detail')
+  root.replaceChildren()
+  const picker = element('div', '', 'flex flex-wrap gap-2 border-b border-border pb-3')
+  picker.setAttribute('role', 'tablist')
+  for (const item of usageMetrics) {
+    const tab = element(
+      'button',
+      item.label,
+      item.key === metric.key ? 'bg-muted font-semibold' : ''
+    )
+    tab.type = 'button'
+    tab.setAttribute('role', 'tab')
+    tab.setAttribute('aria-selected', String(item.key === metric.key))
+    tab.addEventListener('click', () => openUsage(item.key))
+    picker.append(tab)
+  }
+  root.append(picker)
+  const summary = element('div', '', 'space-y-1')
+  summary.append(
+    element(
+      'p',
+      measured.length ? metric.format(total) : 'Not measured yet',
+      'text-2xl font-semibold'
+    ),
+    element(
+      'p',
+      limit && measured.length
+        ? `${Math.round((total / limit) * 100)}% of ${metric.format(limit)} ${metric.limitLabel}`
+        : `Across ${usage.projects.length} project${usage.projects.length === 1 ? '' : 's'}`,
+      'text-sm text-subtle'
+    ),
+    element('p', metric.description, 'text-sm text-subtle')
+  )
+  root.append(summary)
+  const list = element('div', '', 'divide-y divide-border rounded-lg border border-border')
+  const sorted = [...rows].sort((a, b) => (b.value ?? -1) - (a.value ?? -1))
+  for (const { project, value } of sorted) {
+    const share = value !== null && value !== undefined && total > 0 ? value / total : null
+    const item = element('button', '', 'usage-project')
+    item.type = 'button'
+    const top = element('div', '', 'flex items-baseline justify-between gap-3')
+    const name = element('div', '', 'min-w-0')
+    name.append(
+      element('p', project.name, 'truncate text-sm font-medium'),
+      element(
+        'p',
+        !project.running
+          ? 'Paused'
+          : ({ ready: 'Running', error: 'Something went wrong' }[project.status] ?? 'Starting'),
+        `text-xs ${project.status === 'error' ? 'text-danger' : 'text-subtle'}`
+      )
+    )
+    const figure = element('div', '', 'shrink-0 text-right')
+    figure.append(
+      element(
+        'p',
+        value === null || value === undefined ? 'Not measured yet' : metric.format(value),
+        'text-sm'
+      ),
+      element(
+        'p',
+        share === null ? '' : `${Math.round(share * 100)}% of total`,
+        'text-xs text-subtle'
+      )
+    )
+    top.append(name, figure)
+    item.append(top)
+    if (share !== null) {
+      const bar = element('div', '', 'meter mt-2')
+      const fill = element('div', '', 'meter-fill')
+      fill.style.width = `${Math.max(1, share * 100)}%`
+      bar.append(fill)
+      item.append(bar)
+    }
+    item.title = `Open ${project.name} (${metric.tab})`
+    item.addEventListener('click', async () => {
+      try {
+        const full = await api(`/api/projects/${project.id}`)
+        $('usage-dialog').close()
+        activeTab = metric.tab
+        await detail(full)
+      } catch (error) {
+        notice(error.message)
+      }
+    })
+    list.append(item)
+  }
+  if (!rows.length) list.append(element('p', 'No projects yet.', 'p-4 text-sm text-subtle'))
+  root.append(list)
+  const observed = usage.projects
+    .map((p) => (metric.tab === 'Performance' ? p.insightsAt : p.observedAt))
+    .filter(Boolean)
+    .sort()
+    .at(-1)
+  root.append(
+    element(
+      'p',
+      `${observed ? `Last measured ${formatTime(observed)}. ` : ''}Select a project to open it.`,
+      'text-xs text-subtle'
+    )
+  )
 }
 function renderProjects() {
   const rows = visibleProjects()
@@ -1913,6 +2142,7 @@ async function loadProjects(reset = false) {
   nextCursor = page.nextCursor
   $('more').hidden = !nextCursor
   renderProjects()
+  loadUsage()
 }
 for (const node of document.querySelectorAll('[data-close]'))
   node.addEventListener('click', () => node.closest('dialog').close())
@@ -2083,6 +2313,7 @@ try {
         }
       }
       renderProjects()
+      await loadUsage()
     } catch (error) {
       notice(error.message)
     }
