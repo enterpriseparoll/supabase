@@ -4,6 +4,7 @@ import { createElement } from 'react'
 
 import type { ProductMenuGroup } from '@/components/ui/ProductMenu/ProductMenu.types'
 import { useIsFeatureEnabled } from '@/hooks/misc/useIsFeatureEnabled'
+import { IS_PLATFORM } from '@/lib/constants'
 import { SHORTCUT_IDS } from '@/state/shortcuts/registry'
 
 const ExternalLinkIcon = createElement(ArrowUpRightIcon, { strokeWidth: 1, className: 'h-4 w-4' })
@@ -229,7 +230,8 @@ export const useGenerateAuthMenu = (): ProductMenuGroup[] => {
       multiFactor: authenticationMultiFactor,
       attackProtection: authenticationAttackProtection,
       performance: authenticationPerformance,
-      passkeys: enablePasskeyAuth,
+      // Self-hosted Auth servers support passkeys without the platform's rollout flag.
+      passkeys: enablePasskeyAuth || !IS_PLATFORM,
     },
   })
 }
