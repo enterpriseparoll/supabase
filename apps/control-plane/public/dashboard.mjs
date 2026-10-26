@@ -1700,10 +1700,23 @@ const projectStatus = (project) => {
     }
   if (project.status === 'stopped')
     return { key: 'paused', label: 'Project is paused', icon: 'pause', tone: 'text-subtle' }
+  const unhealthy = project.metrics?.unhealthyServices ?? []
+  if (project.status === 'ready' && unhealthy.length)
+    return {
+      key: 'running',
+      label: `Running, slow to respond: ${unhealthy.join(', ')}`,
+      icon: 'dot',
+      tone: 'text-warning',
+    }
   if (project.status === 'ready')
     return { key: 'running', label: 'Project is running', icon: 'dot', tone: 'text-ok' }
   if (project.status === 'error')
-    return { key: 'error', label: 'Something went wrong', icon: 'dot', tone: 'text-danger' }
+    return {
+      key: 'error',
+      label: unhealthy.length ? `Not responding: ${unhealthy.join(', ')}` : 'Something went wrong',
+      icon: 'dot',
+      tone: 'text-danger',
+    }
   return {
     key: 'provisioning',
     label: 'Project is provisioning',

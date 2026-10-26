@@ -8,6 +8,7 @@ import { Infrastructure } from './infrastructure.mjs'
 import { pollGithub, runDeployment } from './github.mjs'
 import { serveLiveRequests } from './live.mjs'
 import { ProjectDatabase } from './project-db.mjs'
+import { projectHealth } from './health.mjs'
 import { ProjectLogs } from './logs.mjs'
 import { ProjectStorage } from './storage.mjs'
 import { ProjectDatabaseSettings } from './database-settings.mjs'
@@ -291,12 +292,12 @@ export async function observe(pool, infrastructure, config = {}) {
       ).rows[0].locked
       if (!locked) continue
       try {
-        const metrics = await infrastructure.metrics(project)
+        const health = projectHealth(await infrastructure.metrics(project), project.metrics)
         await db.query(
           'UPDATE control.projects SET metrics=$2,last_observed_at=now(),status=$3 WHERE id=$1',
-          [project.id, metrics, metrics.healthy ? 'ready' : 'error']
+          [project.id, health.metrics, health.status]
         )
-        if (metrics.healthy) {
+        if (health.serving) {
           // Recreating Traefik drops networks joined at runtime; rejoin before routing.
           await infrastructure.attachIngress(project)
           await infrastructure.route(project)
