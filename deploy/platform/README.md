@@ -409,6 +409,28 @@ create simulated buckets or redirect self-hosted users to a paid cloud plan.
 Standalone Studio deployments without this project platform show their Storage
 environment settings as read-only.
 
+### Observability in Studio
+
+Studio's **Observability** section works without a logs analytics service:
+
+- **Overview:** CPU, memory, disk, peak connections, slow queries, and request and
+  error counts for each service.
+- **Query Performance**, **Database Connections**, and the **Database** report.
+
+Every minute the worker records each running project's resource use (from Docker
+and the database) and counts each service's new log lines as OK, warning, or error.
+Studio reads these from the control API. History is kept for 8 days. Charts start
+filling in from the first minute after you update; there is no earlier history.
+
+The API Gateway, Data API, Auth, Edge Functions, Storage, and Realtime reports
+query a logs analytics service (Logflare) and stay hidden.
+
+**Keeping memory for your projects.** Other Docker containers on the same machine
+(another Supabase stack, Supabase CLI projects, build containers) compete with your
+projects for memory. `.\free-memory.ps1` in this folder lists the running
+containers that aren't part of the platform; `.\free-memory.ps1 -Apply` stops them.
+Nothing is deleted, and `docker start <name>` brings one back.
+
 ### Database settings and Studio logs
 
 The Database → Settings page in the custom Studio image manages Supavisor pool

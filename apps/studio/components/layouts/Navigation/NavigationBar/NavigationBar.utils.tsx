@@ -22,7 +22,7 @@ import type { Project } from '@/data/projects/project-detail-query'
 import { useDeploymentMode } from '@/hooks/misc/useDeploymentMode'
 import { useIsFeatureEnabled } from '@/hooks/misc/useIsFeatureEnabled'
 import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
-import { IS_PLATFORM, PROJECT_STATUS } from '@/lib/constants'
+import { PROJECT_STATUS } from '@/lib/constants'
 import { PRODUCT_NAME } from '@/lib/constants/compute'
 import { SHORTCUT_IDS } from '@/state/shortcuts/registry'
 
@@ -232,13 +232,7 @@ export const generateOtherRoutes = (
             label: 'Observability',
             disabled: !isProjectActive,
             icon: <TelescopeIcon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-            link:
-              ref &&
-              (isProjectBuilding
-                ? buildingUrl
-                : IS_PLATFORM
-                  ? `/project/${ref}/observability`
-                  : `/project/${ref}/query-performance`),
+            link: ref && (isProjectBuilding ? buildingUrl : `/project/${ref}/observability`),
             shortcutId: SHORTCUT_IDS.NAV_OBSERVABILITY,
           },
         ]

@@ -1361,3 +1361,63 @@ test('usage totals every accessible project and hides others', async () => {
   })
   assert.equal(response.status, 200)
 })
+
+test('Studio Observability reads only its own project samples and log counts', async () => {
+  const id = (await createProject(pool, config, 'owner', input, randomUUID())).project_id
+  const other = (await createProject(pool, config, 'owner', input, randomUUID())).project_id
+  const raw = token()
+  await pool.query(
+    "INSERT INTO control.project_members(project_id,subject,role) VALUES($1,'obs-operator','operator')",
+    [id]
+  )
+  await pool.query(
+    "INSERT INTO control.sessions(token_hash,subject,project_id,expires_at) VALUES($1,'obs-operator',$2,now()+interval '1 hour')",
+    [hash(raw), id]
+  )
+  const now = Date.now()
+  const sample = (cpuPercent) => ({ cpus: 2, cpuPercent, memoryUsed: 256, memoryLimit: 1024 })
+  for (const [project, cpu] of [
+    [id, 50],
+    [other, 190],
+  ])
+    await pool.query(
+      'INSERT INTO control.project_metric_samples(project_id,sampled_at,sample) VALUES($1,$2,$3)',
+      [project, new Date(now - 120000), sample(cpu)]
+    )
+  await pool.query(
+    "INSERT INTO control.project_log_counts(project_id,bucket,service,ok,warning,error) VALUES($1,date_trunc('minute',now()-interval '2 minutes'),'api-gw',7,2,1)",
+    [id]
+  )
+  const host = `${id}.studio.${config.baseDomain}`
+  const get = (route) =>
+    new Promise((resolve, reject) => {
+      const req = httpRequest(
+        `${base}${route}`,
+        { headers: { Host: host, Cookie: `__Host-studio=${raw}` } },
+        (res) => {
+          let text = ''
+          res.on('data', (chunk) => (text += chunk))
+          res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }))
+        }
+      )
+      req.on('error', reject)
+      req.end()
+    })
+  const start = new Date(now - 3600000).toISOString()
+  const end = new Date(now).toISOString()
+  const infra = await get(
+    `/api/platform/projects/default/infra-monitoring?attributes=avg_cpu_usage&attributes=ram_usage&startDate=${start}&endDate=${end}&interval=1h`
+  )
+  assert.equal(infra.status, 200)
+  assert.equal(infra.body.series.avg_cpu_usage.totalAverage, 25)
+  assert.equal(infra.body.series.ram_usage.totalAverage, 25)
+  const health = await get(
+    `/api/platform/projects/default/analytics/endpoints/service-health?iso_timestamp_start=${start}&iso_timestamp_end=${end}&granularity=hour`
+  )
+  assert.equal(health.status, 200)
+  assert.deepEqual(health.body.result[0].edge_logs, { ok: 7, warning: 2, error: 1, total: 10 })
+  const invalid = await get(
+    `/api/platform/projects/default/infra-monitoring?attributes=avg_cpu_usage&startDate=${start}&interval=2y`
+  )
+  assert.equal(invalid.status, 400)
+})

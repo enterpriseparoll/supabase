@@ -26,6 +26,7 @@ import { ShortcutTooltip } from '@/components/ui/ShortcutTooltip'
 import { useIsDataApiEnabled } from '@/hooks/misc/useIsDataApiEnabled'
 import { useIsFeatureEnabled } from '@/hooks/misc/useIsFeatureEnabled'
 import { useSelectedOrganizationQuery } from '@/hooks/misc/useSelectedOrganization'
+import { IS_PLATFORM } from '@/lib/constants'
 import { SHORTCUT_IDS } from '@/state/shortcuts/registry'
 import { useShortcut } from '@/state/shortcuts/useShortcut'
 
@@ -76,10 +77,13 @@ export const ObservabilityOverview = () => {
   })
 
   const getLogsUrl = useCallback(
-    (logType: UnifiedLogType, legacyLogsUrl: string) =>
-      isUnifiedLogsEnabled
+    (logType: UnifiedLogType, legacyLogsUrl: string) => {
+      // Self-hosted projects have one log viewer for every service.
+      if (!IS_PLATFORM) return `/project/${projectRef}/logs`
+      return isUnifiedLogsEnabled
         ? buildUnifiedLogsUrl({ projectRef: projectRef!, logType })
-        : `/project/${projectRef}${legacyLogsUrl}`,
+        : `/project/${projectRef}${legacyLogsUrl}`
+    },
     [projectRef, isUnifiedLogsEnabled]
   )
 
@@ -167,7 +171,7 @@ export const ObservabilityOverview = () => {
       const start = datum.timestamp
       const end = dayjs.utc(datum.timestamp).add(1, unit).toISOString()
 
-      if (isUnifiedLogsEnabled) {
+      if (IS_PLATFORM && isUnifiedLogsEnabled) {
         router.push(
           buildUnifiedLogsUrl({ projectRef: projectRef!, logType: service.logType, start, end })
         )
@@ -232,7 +236,11 @@ export const ObservabilityOverview = () => {
             key: service.key,
             name: service.name,
             description: '',
-            reportUrl: service.hasReport ? service.reportUrl : undefined,
+            // Self-hosted projects only have the Database report (no logs analytics).
+            reportUrl:
+              service.hasReport && (IS_PLATFORM || service.key === 'db')
+                ? service.reportUrl
+                : undefined,
             logType: service.logType,
             logsUrl: service.logsUrl,
           }))}

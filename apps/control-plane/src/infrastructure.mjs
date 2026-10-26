@@ -421,6 +421,7 @@ export class Infrastructure {
         memory: row.MemUsage,
         memoryPercent: row.MemPerc,
         blockIO: row.BlockIO,
+        net: row.NetIO,
       })),
       healthy: containers.every(
         (row) => row.State === 'running' && (!row.Health || row.Health === 'healthy')

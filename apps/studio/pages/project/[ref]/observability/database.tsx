@@ -44,13 +44,23 @@ import { FGA_PERMISSIONS, useAsyncCheckPermissionsV2 } from '@/hooks/misc/useChe
 import { useRefreshHandler, useReportDateRange } from '@/hooks/misc/useReportDateRange'
 import { useSelectedOrganizationQuery } from '@/hooks/misc/useSelectedOrganization'
 import { useIsHighAvailability, useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
-import { DOCS_URL } from '@/lib/constants'
+import { DOCS_URL, IS_PLATFORM } from '@/lib/constants'
 import { formatBytes } from '@/lib/helpers'
 import { useDatabaseSelectorStateSnapshot } from '@/state/database-selector'
 import { useMemoryCommitmentPreview } from '@/state/metrics-preview'
 import { SHORTCUT_IDS } from '@/state/shortcuts/registry'
 import { useShortcut } from '@/state/shortcuts/useShortcut'
 import type { NextPageWithLayout } from '@/types'
+
+// Charts a self-hosted project has data for (see the platform's observability samples).
+const SELF_HOSTED_CHARTS = new Set([
+  'ram-usage',
+  'cpu-usage',
+  'network-throughput',
+  'disk-throughput',
+  'client-connections',
+  'disk-size',
+])
 
 const DatabaseReport: NextPageWithLayout = () => {
   return (
@@ -184,7 +194,10 @@ const DatabaseUsage = () => {
   const databaseSizeBytes = databaseSizeData ?? 0
   const currentDiskSize = project?.volumeSizeGb ?? 0
 
-  const { data: diskConfig } = useDiskAttributesQuery({ projectRef: project?.ref })
+  const { data: diskConfig } = useDiskAttributesQuery(
+    { projectRef: project?.ref },
+    { enabled: IS_PLATFORM }
+  )
   const { data: maxConnections } = useMaxConnectionsQuery({
     projectRef: project?.ref,
     connectionString: project?.connectionString,
@@ -208,9 +221,11 @@ const DatabaseUsage = () => {
   const { getEntitlementSetValues, isLoading: isEntitlementLoading } = useCheckEntitlements(
     'observability.dashboard_advanced_metrics'
   )
-  const entitledFeatures = getEntitlementSetValues()
+  // Self-hosted projects have no plans: every chart they have data for is available.
+  const entitledFeatures = IS_PLATFORM ? getEntitlementSetValues() : ['database']
 
-  const isSpendCapEnabled = entitledFeatures.includes('database') && !org?.usage_billing_enabled
+  const isSpendCapEnabled =
+    IS_PLATFORM && entitledFeatures.includes('database') && !org?.usage_billing_enabled
 
   const showDiskIOBurstBalanceChart = useFlag('showDiskIOBurstBalanceChart')
   const showMemoryCommitmentChart = useFlag('showMemoryCommitmentChart')
@@ -232,7 +247,7 @@ const DatabaseUsage = () => {
     showDiskIOBurstBalanceChart,
     showMemoryCommitmentChart,
     showMemoryCommitmentRiskZones
-  )
+  ).filter((chart) => IS_PLATFORM || SELF_HOSTED_CHARTS.has(chart.id ?? ''))
 
   const { isPending: isUpdatingDiskSize } = useProjectDiskResizeMutation({
     onSuccess: (_, variables) => {

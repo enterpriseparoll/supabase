@@ -139,7 +139,10 @@ export function parseLogLine(line, service, secrets = []) {
   }
 }
 
-function dockerGet(path, { socketPath = '/var/run/docker.sock', maxBytes = 1024 * 1024 } = {}) {
+export function dockerGet(
+  path,
+  { socketPath = '/var/run/docker.sock', maxBytes = 1024 * 1024 } = {}
+) {
   return new Promise((resolve, reject) => {
     const req = request({ socketPath, path, method: 'GET' }, (res) => {
       const chunks = []

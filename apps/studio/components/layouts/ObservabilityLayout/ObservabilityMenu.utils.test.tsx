@@ -101,15 +101,19 @@ describe('useGenerateObservabilityMenu', () => {
     expect(result.current.some((section) => section.title === 'PRODUCT')).toBe(true)
   })
 
-  it('excludes API Gateway and the PRODUCT section in self-hosted mode', () => {
+  it('shows the overview and only the Database report in self-hosted mode', () => {
     mockIsPlatform.value = false
 
     const { result } = renderHook(() => useGenerateObservabilityMenu())
     const general = result.current.find((section) => section.title === 'GENERAL')
+    const product = result.current.find((section) => section.title === 'PRODUCT')
 
-    expect(general?.items.some((item) => item.key === 'api-overview')).toBe(false)
-    expect(result.current.some((section) => section.title === 'PRODUCT')).toBe(false)
-    expect(result.current.length).toBe(1)
+    expect(general?.items.map((item) => item.key)).toEqual([
+      'observability',
+      'query-performance',
+      'connections',
+    ])
+    expect(product?.items.map((item) => item.key)).toEqual(['database'])
   })
 
   it('includes Storage in the PRODUCT section only when project_storage:all is enabled', () => {

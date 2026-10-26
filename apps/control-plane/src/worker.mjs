@@ -9,6 +9,7 @@ import { pollGithub, runDeployment } from './github.mjs'
 import { serveLiveRequests } from './live.mjs'
 import { ProjectDatabase } from './project-db.mjs'
 import { projectHealth } from './health.mjs'
+import { ProjectObservability } from './observability.mjs'
 import { ProjectLogs } from './logs.mjs'
 import { ProjectStorage } from './storage.mjs'
 import { ProjectDatabaseSettings } from './database-settings.mjs'
@@ -275,7 +276,7 @@ async function recordInspection(db, infrastructure, project) {
     )
   }
 }
-export async function observe(pool, infrastructure, config = {}) {
+export async function observe(pool, infrastructure, config = {}, observability) {
   const projects = (
     await pool.query(
       "SELECT * FROM control.projects WHERE status IN ('ready','error') AND desired_state='running' ORDER BY last_observed_at NULLS FIRST LIMIT 20"
@@ -301,6 +302,17 @@ export async function observe(pool, infrastructure, config = {}) {
           // Recreating Traefik drops networks joined at runtime; rejoin before routing.
           await infrastructure.attachIngress(project)
           await infrastructure.route(project)
+          try {
+            await observability?.record(project, health.metrics)
+          } catch (error) {
+            console.error(
+              JSON.stringify({
+                event: 'observability.failed',
+                project: project.id,
+                error: error.message,
+              })
+            )
+          }
           const insights = (
             await db.query(
               'SELECT collected_at FROM control.project_insights WHERE project_id=$1',
@@ -368,6 +380,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const projectLogs = new ProjectLogs(config)
   const projectStorage = new ProjectStorage(infrastructure)
   const databaseSettings = new ProjectDatabaseSettings(infrastructure, config)
+  const observability = new ProjectObservability(pool, infrastructure)
   // Interactive requests (SQL, types, functions) run beside the operation queue.
   const live = serveLiveRequests(pool, {
     sql: (project, payload, options) => projectDb.sql(project, payload, options),
@@ -401,7 +414,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         lastGithubPoll = Date.now()
       }
       if (Date.now() - lastObservation > 60000) {
-        await observe(pool, infrastructure, config)
+        await observe(pool, infrastructure, config, observability)
         await scheduleBackups(pool)
         await pool.query('DELETE FROM control.sessions WHERE expires_at<now()')
         await pool.query('DELETE FROM control.login_flows WHERE expires_at<now()')

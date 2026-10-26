@@ -218,7 +218,7 @@ export function routeConfiguration(project, domains, config) {
     // Platform endpoints served on the Studio origin (the project switcher's list).
     // The control API authenticates these with the Studio session cookie itself.
     [`${id}-platform`]: {
-      rule: `Host(\`${id}.studio.${config.baseDomain}\`) && (PathPrefix(\`/_platform/api/\`) || Path(\`/api/platform/projects/default/config/storage\`) || Path(\`/api/platform/storage/default/credentials\`))`,
+      rule: `Host(\`${id}.studio.${config.baseDomain}\`) && (PathPrefix(\`/_platform/api/\`) || Path(\`/api/platform/projects/default/config/storage\`) || Path(\`/api/platform/storage/default/credentials\`) || Path(\`/api/platform/projects/default/infra-monitoring\`) || Path(\`/api/platform/projects/default/analytics/endpoints/service-health\`))`,
       priority: 1000,
       ...entry,
       service: 'management@file',

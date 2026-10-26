@@ -1,4 +1,4 @@
-import { useFeatureFlags, useFlag, useParams } from 'common'
+import { IS_PLATFORM, useFeatureFlags, useFlag, useParams } from 'common'
 import { useRouter } from 'next/router'
 import { parseAsBoolean, useQueryState } from 'nuqs'
 import { useEffect } from 'react'
@@ -21,7 +21,8 @@ export const UserReportPage: NextPageWithLayout = () => {
   const { ref } = useParams()
 
   const { hasLoaded: flagsLoaded } = useFeatureFlags()
-  const showOverview = useFlag('observabilityOverview')
+  // Self-hosted projects get the overview from the platform's own metrics.
+  const showOverview = useFlag('observabilityOverview') || !IS_PLATFORM
   const [showCreateReportModal, setShowCreateReportModal] = useQueryState(
     'newReport',
     parseAsBoolean.withDefault(false).withOptions({ history: 'push', clearOnDefault: true })

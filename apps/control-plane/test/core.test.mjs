@@ -272,7 +272,7 @@ test('Studio origin forwards only platform API paths to the control API', () => 
     const platform = route.http.routers[`${id}-platform`]
     assert.equal(
       platform.rule,
-      `Host(\`${id}.studio.${config.baseDomain}\`) && (PathPrefix(\`/_platform/api/\`) || Path(\`/api/platform/projects/default/config/storage\`) || Path(\`/api/platform/storage/default/credentials\`))`
+      `Host(\`${id}.studio.${config.baseDomain}\`) && (PathPrefix(\`/_platform/api/\`) || Path(\`/api/platform/projects/default/config/storage\`) || Path(\`/api/platform/storage/default/credentials\`) || Path(\`/api/platform/projects/default/infra-monitoring\`) || Path(\`/api/platform/projects/default/analytics/endpoints/service-health\`))`
     )
     assert.equal(platform.service, 'management@file')
     assert(platform.priority > 0)

@@ -5,6 +5,12 @@ import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { configuration } from './config.mjs'
 import { localLoginPage } from './login-page.mjs'
+import {
+  infraMonitoringInput,
+  readInfraMonitoring,
+  readServiceHealth,
+  serviceHealthInput,
+} from './observability.mjs'
 import { logsInput } from './logs.mjs'
 import { storagePatch } from './storage.mjs'
 import { databaseSettingsPatch } from './database-settings.mjs'
@@ -106,6 +112,8 @@ export function managementServer(pool, config, oidc) {
     mcp: rateLimiter(config.rateLimits?.mcp ?? { capacity: 120, perMinute: 120 }),
     webhook: rateLimiter({ capacity: 60, perMinute: 60 }),
     logs: rateLimiter({ capacity: 12, perMinute: 30 }),
+    // A report page asks for each chart separately.
+    observability: rateLimiter({ capacity: 60, perMinute: 240 }),
   }
   const assets = new Map([
     ['/', ['index.html', 'text/html']],
@@ -212,6 +220,10 @@ export function managementServer(pool, config, oidc) {
         // Studio session cookie (dashboard cookies are cross-site on *.localhost).
         const storageConfigPath = '/api/platform/projects/default/config/storage'
         const storageCredentialsPath = '/api/platform/storage/default/credentials'
+        // Studio's Observability pages, answered from the worker's samples and log counts.
+        const infraMonitoringPath = '/api/platform/projects/default/infra-monitoring'
+        const serviceHealthPath =
+          '/api/platform/projects/default/analytics/endpoints/service-health'
         const studioLogsAssets = new Map([
           ['view', ['studio-logs.html', 'text/html']],
           ['studio-logs.mjs', ['studio-logs.mjs', 'text/javascript']],
@@ -230,7 +242,9 @@ export function managementServer(pool, config, oidc) {
           studioLogsFile ||
           databaseSettingsRoute ||
           path === storageConfigPath ||
-          path === storageCredentialsPath
+          path === storageCredentialsPath ||
+          path === infraMonitoringPath ||
+          path === serviceHealthPath
         ) {
           const host = request.headers.host
           const hostname =
@@ -350,6 +364,21 @@ export function managementServer(pool, config, oidc) {
             )
             response.end(await readFile(new URL(`../public/${asset[0]}`, import.meta.url)))
             return
+          }
+          if (path === infraMonitoringPath || path === serviceHealthPath) {
+            invariant(request.method === 'GET', 405, 'Method not allowed')
+            invariant(
+              limits.observability.take(`${subject}:${id}`),
+              429,
+              'Too many requests. Wait a moment and try again.'
+            )
+            return send(
+              response,
+              200,
+              path === infraMonitoringPath
+                ? await readInfraMonitoring(pool, id, infraMonitoringInput(url.searchParams))
+                : await readServiceHealth(pool, id, serviceHealthInput(url.searchParams))
+            )
           }
           if (path === storageConfigPath) {
             invariant(['GET', 'PATCH'].includes(request.method), 405, 'Method not allowed')

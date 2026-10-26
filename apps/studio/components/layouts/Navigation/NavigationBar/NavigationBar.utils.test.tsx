@@ -141,11 +141,11 @@ describe('generateOtherRoutes', () => {
     expect(keys(routes)).not.toContain('observability')
   })
 
-  it('links observability to the query performance page in self-hosted mode', () => {
+  it('links observability to the overview in self-hosted mode', () => {
     // NEXT_PUBLIC_IS_PLATFORM is false in .env.test, so IS_PLATFORM is false here
     const routes = generateOtherRoutes(REF, activeProject, { showReports: true })
     const observabilityRoute = routes.find((r) => r.key === 'observability')
-    expect(observabilityRoute?.link).toBe(`/project/${REF}/query-performance`)
+    expect(observabilityRoute?.link).toBe(`/project/${REF}/observability`)
   })
 
   it('does not include API Docs nav item', () => {
