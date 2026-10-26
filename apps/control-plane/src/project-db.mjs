@@ -94,11 +94,13 @@ export function migrationPlan(local, remoteVersions) {
 }
 
 export class ProjectDatabase {
-  constructor(config, infrastructure, { Client = pg.Client } = {}) {
+  constructor(config, infrastructure, { Client = pg.Client, command: run = command } = {}) {
     this.config = config
     this.infrastructure = infrastructure
     this.Client = Client
     this.networks = new Set()
+    this.joiningNetworks = new Map()
+    this.command = run
     this.readOnlyReady = new Set()
   }
   secrets(project) {
@@ -117,12 +119,34 @@ export class ProjectDatabase {
     if (this.config.projectDbHost) return
     const network = `${projectName(project.id)}_private`
     if (this.networks.has(network)) return
+    if (this.joiningNetworks.has(network)) return this.joiningNetworks.get(network)
     const self = this.config.workerContainer ?? hostname()
-    const joined = JSON.parse(
-      await command('docker', ['inspect', '--format', '{{json .NetworkSettings.Networks}}', self])
-    )
-    if (!joined[network]) await command('docker', ['network', 'connect', network, self])
-    this.networks.add(network)
+    const inspect = async () =>
+      JSON.parse(
+        await this.command('docker', [
+          'inspect',
+          '--format',
+          '{{json .NetworkSettings.Networks}}',
+          self,
+        ])
+      )
+    const joining = (async () => {
+      const joined = await inspect()
+      if (!joined[network]) {
+        try {
+          await this.command('docker', ['network', 'connect', network, self])
+        } catch (error) {
+          if (!(await inspect())[network]) throw error
+        }
+      }
+      this.networks.add(network)
+    })()
+    this.joiningNetworks.set(network, joining)
+    try {
+      await joining
+    } finally {
+      this.joiningNetworks.delete(network)
+    }
   }
   host(project, service) {
     return this.config.projectDbHost ?? this.container(project, service)

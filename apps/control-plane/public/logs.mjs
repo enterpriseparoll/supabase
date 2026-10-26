@@ -25,7 +25,7 @@ export async function renderProjectLogs(project, root, { api, button }) {
     live = false,
     timer,
     selectedEntry
-  const active = () => root.isConnected && root.closest('dialog')?.open
+  const active = () => root.isConnected && (root.closest('dialog')?.open ?? true)
   const intro = node('div', '', 'space-y-1')
   intro.append(
     node('h3', 'Project logs', 'font-semibold'),

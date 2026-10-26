@@ -98,6 +98,12 @@ export function renderCompose(source, project, { local = false } = {}) {
   compose.services.rest.environment.PGRST_JWT_SECRET = '${JWT_JWKS}'
   compose.services.realtime.environment.API_JWT_JWKS = '${JWT_JWKS}'
   compose.services.storage.environment.JWT_JWKS = '${JWT_JWKS}'
+  compose.services.storage.environment.VECTOR_ENABLED = 'true'
+  compose.services.storage.environment.VECTOR_BUCKET_PROVIDER = 'pgvector'
+  compose.services.storage.environment.VECTOR_DATABASE_URL =
+    'postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres'
+  compose.services.storage.environment.VECTOR_DATABASE_CREATE = 'false'
+  compose.services.storage.environment.VECTOR_STORE_MIGRATIONS_ENABLED = 'true'
   compose.services.functions.environment.SUPABASE_JWKS = '${JWT_JWKS}'
   return stringify(compose)
 }
@@ -212,7 +218,7 @@ export function routeConfiguration(project, domains, config) {
     // Platform endpoints served on the Studio origin (the project switcher's list).
     // The control API authenticates these with the Studio session cookie itself.
     [`${id}-platform`]: {
-      rule: `Host(\`${id}.studio.${config.baseDomain}\`) && PathPrefix(\`/_platform/api/\`)`,
+      rule: `Host(\`${id}.studio.${config.baseDomain}\`) && (PathPrefix(\`/_platform/api/\`) || Path(\`/api/platform/projects/default/config/storage\`) || Path(\`/api/platform/storage/default/credentials\`))`,
       priority: 1000,
       ...entry,
       service: 'management@file',

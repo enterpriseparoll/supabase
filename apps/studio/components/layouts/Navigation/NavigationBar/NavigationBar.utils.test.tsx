@@ -120,6 +120,10 @@ describe('generateProductRoutes', () => {
 })
 
 describe('generateOtherRoutes', () => {
+  it('keeps native self-hosted logs visible and links to the Studio viewer', () => {
+    const routes = generateOtherRoutes(REF, activeProject, { isSelfHosted: true, showLogs: false })
+    expect(routes.find((route) => route.key === 'logs')?.link).toBe(`/project/${REF}/logs`)
+  })
   it('always includes advisors, logs, and integrations', () => {
     const routes = generateOtherRoutes(REF, activeProject)
     expect(keys(routes)).toContain('advisors')

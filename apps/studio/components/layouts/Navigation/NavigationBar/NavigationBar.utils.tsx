@@ -19,6 +19,7 @@ import { ICON_SIZE, ICON_STROKE_WIDTH } from '@/components/interfaces/Sidebar'
 import type { Route } from '@/components/ui/ui.types'
 import { EditorIndexPageLink } from '@/data/prefetchers/project.$ref.editor'
 import type { Project } from '@/data/projects/project-detail-query'
+import { useDeploymentMode } from '@/hooks/misc/useDeploymentMode'
 import { useIsFeatureEnabled } from '@/hooks/misc/useIsFeatureEnabled'
 import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
 import { IS_PLATFORM, PROJECT_STATUS } from '@/lib/constants'
@@ -42,6 +43,7 @@ interface ProductFeatures {
 }
 
 interface OtherFeatures {
+  isSelfHosted?: boolean
   isPlatform?: boolean
   unifiedLogs?: boolean
   showReports?: boolean
@@ -207,7 +209,7 @@ export const generateOtherRoutes = (
 
   const unifiedLogsEnabled = features?.unifiedLogs ?? false
   const reportsEnabled = features?.showReports ?? true
-  const logsEnabled = features?.showLogs ?? true
+  const logsEnabled = features?.isSelfHosted || (features?.showLogs ?? true)
   const isHealthAdvisorEnabled = features?.isHealthAdvisorEnabled ?? false
 
   return [
@@ -250,7 +252,9 @@ export const generateOtherRoutes = (
             icon: <ListIcon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
             link:
               ref &&
-              (unifiedLogsEnabled ? `/project/${ref}/logs` : `/project/${ref}/logs/explorer`),
+              (features?.isSelfHosted || unifiedLogsEnabled
+                ? `/project/${ref}/logs`
+                : `/project/${ref}/logs/explorer`),
             shortcutId: SHORTCUT_IDS.NAV_LOGS,
           },
         ]
@@ -268,6 +272,7 @@ export const generateOtherRoutes = (
 
 // [Joshen] Main hook to consume as it standardizes the generation of the menu items
 export const useGenerateOtherRoutes = (): Route[] => {
+  const { isSelfHosted } = useDeploymentMode()
   const { ref } = useParams()
   const { data: project } = useSelectedProjectQuery()
   const { isEnabled: unifiedLogsEnabled } = useUnifiedLogsPreview()
@@ -276,6 +281,7 @@ export const useGenerateOtherRoutes = (): Route[] => {
   const isHealthAdvisorEnabled = useFlag('healthAdvisor')
 
   return generateOtherRoutes(ref, project, {
+    isSelfHosted,
     unifiedLogs: unifiedLogsEnabled,
     showReports: reportsEnabled,
     showLogs: logsEnabled,

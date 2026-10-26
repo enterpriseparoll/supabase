@@ -20,6 +20,8 @@ import { dirname, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { Resolver } from 'node:dns/promises'
 import { parse, stringify } from 'yaml'
+import { applyStorageSettings } from './storage.mjs'
+import { applyDatabaseSettings, managedPoolerScript } from './database-settings.mjs'
 import { backupDownloadPath, clusterDumpArgs } from './backup-files.mjs'
 import { hash, invariant, projectId, unseal } from './core.mjs'
 import {
@@ -129,7 +131,28 @@ export class Infrastructure {
         { local: this.config.local }
       )
     )
+    try {
+      applyStorageSettings(
+        compose,
+        JSON.parse(await readFile(`${directory}/storage-settings.json`, 'utf8'))
+      )
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
     // A platform Studio build adds the cross-project switcher; stock Studio still works.
+    try {
+      const settings = JSON.parse(await readFile(`${directory}/database-settings.json`, 'utf8'))
+      applyDatabaseSettings(compose, settings)
+      await writeFile(
+        `${directory}/volumes/pooler/pooler.exs`,
+        managedPoolerScript(
+          await readFile(`${this.config.templateRoot}/volumes/pooler/pooler.exs`, 'utf8'),
+          settings
+        )
+      )
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
     if (this.config.studioImage) compose.services.studio.image = this.config.studioImage
     for (const service of Object.values(compose.services)) {
       if (service.image.includes('@sha256:')) continue

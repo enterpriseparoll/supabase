@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { diffLines } from './insights.mjs'
 import { backupDownloadName, backupDownloadPath } from './backup-files.mjs'
 import { githubLinkInput } from './github.mjs'
+import { databasePassword } from './database-settings.mjs'
 import { audit, roleFor, transaction } from './database.mjs'
 import {
   allocationInput,
@@ -181,6 +182,7 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
       'resize',
       'inspect',
       'deploy',
+      'rotate-password',
     ].includes(kind),
     400,
     'Unsupported operation'
@@ -190,6 +192,12 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
     projectId(id)
     authorize(await roleFor(db, actor, id), operationAction(kind))
     const payload = {}
+    if (kind === 'rotate-password')
+      payload.encryptedPassword = seal(
+        { password: databasePassword(input.password) },
+        config.key,
+        id
+      )
     if (['delete', 'restore', 'recover'].includes(kind))
       invariant(input.confirmation === id, 400, 'Confirm the project ID before continuing')
     if (kind === 'restore') {
@@ -207,7 +215,16 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
     }
     if (kind === 'resize') Object.assign(payload, allocationInput(input))
     if (kind === 'deploy') payload.source = 'manual'
-    const requestHash = hash(JSON.stringify({ id, kind, payload }))
+    const requestHash = hash(
+      JSON.stringify({
+        id,
+        kind,
+        payload:
+          kind === 'rotate-password'
+            ? { passwordHash: hash(`${config.key}|${input.password}`) }
+            : payload,
+      })
+    )
     const prior = (
       await db.query('SELECT * FROM control.operations WHERE actor=$1 AND idempotency_key=$2', [
         actor,
@@ -219,6 +236,23 @@ export async function requestOperation(pool, config, actor, id, kind, input, key
       return prior
     }
     const project = await projectAccess(db, actor, id, operationAction(kind), kind === 'recover')
+    if (kind === 'rotate-password') {
+      invariant(
+        project.desired_state === 'running',
+        409,
+        'Resume the project before resetting its password'
+      )
+      invariant(
+        !(
+          await db.query(
+            "SELECT 1 FROM control.operations WHERE project_id=$1 AND state IN ('queued','running')",
+            [id]
+          )
+        ).rowCount,
+        409,
+        'Another project operation is pending'
+      )
+    }
     if (['start', 'stop', 'restart'].includes(kind)) {
       const pending = (
         await db.query(

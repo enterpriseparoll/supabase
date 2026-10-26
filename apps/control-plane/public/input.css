@@ -2,6 +2,7 @@
 @source './index.html';
 @source './dashboard.mjs';
 @source './logs.mjs';
+@source './studio-logs.html';
 @source '../src/login-page.mjs';
 @theme inline {
   --color-background: var(--background);

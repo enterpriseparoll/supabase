@@ -20,16 +20,19 @@ import { DiskSizeConfiguration } from '@/components/interfaces/Settings/Database
 import { JitDbAccessConfiguration } from '@/components/interfaces/Settings/Database/JitDatabaseAccess/JitDbAccessConfiguration'
 import { NetworkRestrictions } from '@/components/interfaces/Settings/Database/NetworkRestrictions/NetworkRestrictions'
 import { PoolingModesModal } from '@/components/interfaces/Settings/Database/PoolingModesModal'
+import { SelfHostedDatabaseSettings } from '@/components/interfaces/Settings/Database/SelfHostedDatabaseSettings'
 import { SettingsDatabaseEmptyStateLocal } from '@/components/interfaces/Settings/Database/SettingsDatabaseEmptyStateLocal'
 import { SSLConfiguration } from '@/components/interfaces/Settings/Database/SSLConfiguration'
 import { DatabaseLayout } from '@/components/layouts/DatabaseLayout/DatabaseLayout'
 import { DefaultLayout } from '@/components/layouts/DefaultLayout'
+import { useDeploymentMode } from '@/hooks/misc/useDeploymentMode'
 import { useIsFeatureEnabled } from '@/hooks/misc/useIsFeatureEnabled'
 import { useIsAwsCloudProvider, useIsAwsK8sCloudProvider } from '@/hooks/misc/useSelectedProject'
 import { IS_PLATFORM } from '@/lib/constants'
 import type { NextPageWithLayout } from '@/types'
 
 const DatabaseSettings: NextPageWithLayout = () => {
+  const { isCli } = useDeploymentMode()
   const isAws = useIsAwsCloudProvider()
   const isAwsK8s = useIsAwsK8sCloudProvider()
   const jitDbAccessEnabled = useIsJitDbAccessEnabled()
@@ -69,14 +72,16 @@ const DatabaseSettings: NextPageWithLayout = () => {
           </PageContainer>
           <PoolingModesModal />
         </>
-      ) : (
+      ) : isCli ? (
         <PageContainer size="small" className="pb-12">
           <PageSection>
-            <PageSectionContent className="space-y-4 md:space-y-8">
+            <PageSectionContent>
               <SettingsDatabaseEmptyStateLocal />
             </PageSectionContent>
           </PageSection>
         </PageContainer>
+      ) : (
+        <SelfHostedDatabaseSettings />
       )}
     </>
   )

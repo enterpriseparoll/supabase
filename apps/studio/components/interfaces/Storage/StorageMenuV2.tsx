@@ -26,7 +26,7 @@ export const StorageMenuV2 = () => {
   const { ref } = useParams()
   const page = useStorageV2Page()
 
-  const { isCli, isPlatform } = useDeploymentMode()
+  const { isCli, isPlatform, isSelfHosted } = useDeploymentMode()
 
   const { storageAnalytics, storageVectors } = useIsFeatureEnabled([
     'storage:analytics',
@@ -36,8 +36,8 @@ export const StorageMenuV2 = () => {
   const isAnalyticsBucketsEnabled = useIsAnalyticsBucketsEnabled({ projectRef: ref })
   const isVectorBucketsEnabled = useIsVectorBucketsEnabled({ projectRef: ref })
 
-  const showAnalytics = isPlatform && storageAnalytics
-  const showVectors = (isPlatform && storageVectors) || isCli
+  const showAnalytics = (isPlatform && storageAnalytics) || isSelfHosted
+  const showVectors = (isPlatform && storageVectors) || isCli || isSelfHosted
 
   useShortcut(SHORTCUT_IDS.NAV_STORAGE_FILES, () => router.push(`/project/${ref}/storage/files`))
   useShortcut(
@@ -51,7 +51,7 @@ export const StorageMenuV2 = () => {
     { enabled: showVectors }
   )
   useShortcut(SHORTCUT_IDS.NAV_STORAGE_S3, () => router.push(`/project/${ref}/storage/s3`), {
-    enabled: isPlatform,
+    enabled: isPlatform || isSelfHosted,
   })
 
   const bucketTypes = Object.entries(BUCKET_TYPES).filter(([key]) => {
@@ -98,7 +98,7 @@ export const StorageMenuV2 = () => {
           })}
         </div>
 
-        {isPlatform && (
+        {(isPlatform || isSelfHosted) && (
           <>
             <div className="h-px w-[calc(100%-1.5rem)] mx-auto md:w-full bg-border" />
             <div className="md:mx-3">

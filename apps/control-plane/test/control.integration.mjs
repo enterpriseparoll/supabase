@@ -1138,6 +1138,156 @@ test('project log requests enforce membership and roles and work for paused proj
   }
 })
 
+test('Studio storage routes bind configuration and credentials to the authenticated project host', async () => {
+  const id = (await createProject(pool, config, 'owner', input, randomUUID())).project_id
+  const other = (await createProject(pool, config, 'owner', input, randomUUID())).project_id
+  const raw = token()
+  await pool.query(
+    "INSERT INTO control.project_members(project_id,subject,role) VALUES($1,'storage-operator','operator')",
+    [id]
+  )
+  await pool.query(
+    "INSERT INTO control.sessions(token_hash,subject,project_id,expires_at) VALUES($1,'storage-operator',$2,now()+interval '1 hour')",
+    [hash(raw), id]
+  )
+  const host = `${id}.studio.${config.baseDomain}`
+  const path = '/api/platform/projects/default/config/storage'
+  const live = serveLiveRequests(
+    pool,
+    {
+      'storage-config': async (project) => {
+        assert.equal(project.id, id)
+        return { fileSizeLimit: 1024 }
+      },
+      'storage-update': async (project, payload) => {
+        assert.equal(project.id, id)
+        return payload.settings
+      },
+      'database-settings': async (project) => {
+        assert.equal(project.id, id)
+        return { poolSize: 20 }
+      },
+      'database-settings-update': async (project, payload) => {
+        assert.equal(project.id, id)
+        return payload.settings
+      },
+      logs: async (project) => {
+        assert.equal(project.id, id)
+        return { entries: [], unavailable: [] }
+      },
+    },
+    { log: { error() {} } }
+  )
+  const request = (route, options = {}) =>
+    new Promise((resolve, reject) => {
+      const req = httpRequest(
+        `${base}${route}`,
+        {
+          method: options.method,
+          headers: { Host: host, Cookie: `__Host-studio=${raw}`, ...options.headers },
+        },
+        (res) => {
+          let text = ''
+          res.on('data', (chunk) => {
+            text += chunk
+          })
+          res.on('end', () =>
+            resolve({
+              status: res.statusCode,
+              headers: new Headers(res.headers),
+              json: async () => JSON.parse(text),
+            })
+          )
+        }
+      )
+      req.on('error', reject)
+      req.end(options.body)
+    })
+  try {
+    assert.equal(
+      (await request(path, { headers: { Host: `${other}.studio.${config.baseDomain}` } })).status,
+      401
+    )
+    assert.equal(
+      (await request(path, { headers: { Cookie: `__Host-studio=${viewerCookie}` } })).status,
+      401
+    )
+    const read = await request(path)
+    assert.equal(read.status, 200)
+    assert.equal((await read.json()).fileSizeLimit, 1024)
+    const patch = (origin, body) =>
+      request(path, {
+        method: 'PATCH',
+        headers: { Origin: origin, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    assert.equal((await patch('https://attacker.example', { fileSizeLimit: 2048 })).status, 403)
+    assert.equal(
+      (await patch(`https://${host}`, { features: { vectorBuckets: { enabled: true } } })).status,
+      400
+    )
+    assert.equal((await patch(`https://${host}`, { fileSizeLimit: 2048 })).status, 200)
+    const credentials = await request('/api/platform/storage/default/credentials')
+    assert.equal(credentials.status, 200)
+    assert.equal(credentials.headers.get('cache-control'), 'no-store')
+    const data = (await credentials.json()).data[0]
+    assert.equal(typeof data.secret_key, 'string')
+    assert.equal(JSON.stringify(data).includes('POSTGRES_PASSWORD'), false)
+    const database = await request('/_platform/api/database-settings')
+    assert.equal(database.status, 200)
+    assert.equal((await database.json()).poolSize, 20)
+    const logs = await request('/_platform/api/logs/entries?service=db')
+    assert.equal(logs.status, 200)
+    const view = await request('/_platform/api/logs/view')
+    assert.equal(view.status, 200)
+    assert.equal(view.headers.get('content-type'), 'text/html')
+    assert.match(view.headers.get('content-security-policy'), /frame-ancestors 'self'/)
+    const denied = token()
+    await pool.query(
+      "INSERT INTO control.sessions(token_hash,subject,project_id,expires_at) VALUES($1,'viewer',$2,now()+interval '1 hour')",
+      [hash(denied), id]
+    )
+    for (const route of [
+      '/_platform/api/database-settings',
+      '/_platform/api/logs/view',
+      '/api/platform/storage/default/credentials',
+    ])
+      assert.equal(
+        (await request(route, { headers: { Cookie: `__Host-studio=${denied}` } })).status,
+        403
+      )
+    await pool.query("UPDATE control.operations SET state='succeeded' WHERE project_id=$1", [id])
+    const password = 'integration-only-reset-password-2026'
+    const queued = await request('/_platform/api/database-settings/password', {
+      method: 'POST',
+      headers: {
+        Origin: `https://${host}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `password-${randomUUID()}`,
+      },
+      body: JSON.stringify({ password }),
+    })
+    assert.equal(queued.status, 202)
+    const operationId = (await queued.json()).id
+    const operation = (
+      await pool.query('SELECT payload FROM control.operations WHERE id=$1', [operationId])
+    ).rows[0]
+    assert.equal(JSON.stringify(operation.payload).includes(password), false)
+    assert.equal(typeof operation.payload.encryptedPassword, 'string')
+    assert.equal(
+      (
+        await request(`/_platform/api/database-settings/operations/${operationId}`, {
+          headers: { Host: `${other}.studio.${config.baseDomain}` },
+        })
+      ).status,
+      401
+    )
+    await pool.query("UPDATE control.operations SET state='failed' WHERE id=$1", [operationId])
+  } finally {
+    await live.stop()
+  }
+})
+
 test('migration checksums ignore line endings but catch real edits', async () => {
   const { readFile } = await import('node:fs/promises')
   const sql = (

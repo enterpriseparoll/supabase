@@ -26,7 +26,6 @@ import { AlertError } from '@/components/ui/AlertError'
 import { InlineLink } from '@/components/ui/InlineLink'
 import { useProjectStorageConfigQuery } from '@/data/config/project-storage-config-query'
 import { usePaginatedBucketsQuery, type Bucket } from '@/data/storage/buckets-query'
-import { IS_PLATFORM } from '@/lib/constants'
 import { formatBytes } from '@/lib/helpers'
 
 export const BucketsPicker = ({
@@ -47,7 +46,7 @@ export const BucketsPicker = ({
   const sortColumn = sortBucket === STORAGE_BUCKET_SORT.ALPHABETICAL ? 'name' : 'created_at'
   const sortOrder = sortBucket === STORAGE_BUCKET_SORT.ALPHABETICAL ? 'asc' : 'desc'
 
-  const { data } = useProjectStorageConfigQuery({ projectRef }, { enabled: IS_PLATFORM })
+  const { data } = useProjectStorageConfigQuery({ projectRef })
   const {
     data: bucketsData,
     error: bucketsError,

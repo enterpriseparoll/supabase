@@ -67,6 +67,7 @@ function button(text, action) {
   return node
 }
 const operationLabels = {
+  'rotate-password': 'Reset database password',
   start: 'Resume',
   stop: 'Pause',
   restart: 'Restart',

@@ -383,3 +383,58 @@ Before exposing a deployment: validate the chosen OIDC provider's MFA claims,
 test two real project stacks and cross-project network denial on Linux, exercise
 Auth/Storage/Realtime/Functions through HTTPS, check renewal, run a clean-host
 restore, scan images, and have the privileged worker independently reviewed.
+
+### Storage pages
+
+The custom Studio image exposes Files settings, Vectors, Analytics, and S3 on
+self-hosted projects. Files settings persist per project and restart only Storage;
+failed health checks restore the previous settings. Bucket limits are checked
+before lowering the global upload limit. The project must be running and no other
+lifecycle operation may be pending.
+
+Local vector buckets use the Storage server's native pgvector provider, with its
+`storage_vectors` schema in the project's existing database so database backups
+include vector data. The cloud-only S3 foreign-data wrapper is not installed.
+Restart existing projects after upgrading the platform to enable this provider.
+
+S3 shows the project's public `/storage/v1/s3` endpoint and host-managed access
+key. Credentials are fetched only after selecting **Show credentials**, scoped to
+the Studio session's project, and restricted to owners and operators. Use
+path-style addressing. These credentials bypass RLS and belong on trusted servers;
+rotation is managed by the host rather than the cloud credential service.
+
+Analytics buckets require additional Iceberg catalog infrastructure, absent from
+the default local stack. The Analytics page explains this requirement; it does not
+create simulated buckets or redirect self-hosted users to a paid cloud plan.
+Standalone Studio deployments without this project platform show their Storage
+environment settings as read-only.
+
+### Database settings and Studio logs
+
+The Database → Settings page in the custom Studio image manages Supavisor pool
+and client limits, incoming pooler TLS, CIDR allow lists, Postgres connection
+logging, and native network bans. Local mode remains bound to loopback; changing
+a CIDR does not publish the database on the internet. Docker may translate client
+IP addresses to its gateway address. An empty allow list rejects incoming pooler
+connections; internal services continue using the private database network.
+
+**Configure local TLS** creates a project-specific, one-year certificate for
+`localhost` and `127.0.0.1`, mounts it read-only into Supavisor, and restarts only
+the pooler. Download the certificate for clients that verify their server.
+Enforcement rejects unencrypted connections on both published pooler ports;
+private service-to-database connections are unaffected. Public server deployments
+need a host-issued certificate rather than the local certificate action.
+
+Password resets run as durable operations with encrypted payloads. The worker
+updates the known internal database roles, stores the new encrypted project
+secret, and reconnects the project services. Retrying an interrupted operation
+can authenticate using either the previous or new password. Passwords use 20–128
+URL-safe characters because the stack interpolates database connection URLs.
+Disk capacity is owned by Docker Desktop or the host; the page shows observed
+usage and links to the infrastructure dashboard.
+
+Studio's **Logs** navigation now opens the native project log viewer directly.
+Its frame, assets, and requests authenticate with the Studio session and derive
+the project from its host; callers cannot select another project's containers.
+This viewer supports bounded container history, not the hosted SQL analytics
+service. The separate project dashboard's Logs tab remains available as well.

@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url'
 import { configuration } from './config.mjs'
 import { localLoginPage } from './login-page.mjs'
 import { logsInput } from './logs.mjs'
+import { storagePatch } from './storage.mjs'
+import { databaseSettingsPatch } from './database-settings.mjs'
 import { database, audit, roleFor, sessionSubject, transaction } from './database.mjs'
 import { authenticate, cookieValue, oidcClient, sessionCookie, verifyOrigin } from './auth.mjs'
 import { createAccessToken, listAccessTokens, revokeAccessToken, tokenSubject } from './tokens.mjs'
@@ -29,6 +31,7 @@ import {
   publicUrl,
   rateLimiter,
   token,
+  unseal,
 } from './core.mjs'
 import {
   addDomain,
@@ -207,7 +210,28 @@ export function managementServer(pool, config, oidc) {
         // Traefik routes <id>.studio.<domain>/_platform/api/* here with the Host intact,
         // so Studio's project switcher can list projects on its own origin using the
         // Studio session cookie (dashboard cookies are cross-site on *.localhost).
-        if (path === '/_platform/api/projects' && request.method === 'GET') {
+        const storageConfigPath = '/api/platform/projects/default/config/storage'
+        const storageCredentialsPath = '/api/platform/storage/default/credentials'
+        const studioLogsAssets = new Map([
+          ['view', ['studio-logs.html', 'text/html']],
+          ['studio-logs.mjs', ['studio-logs.mjs', 'text/javascript']],
+          ['logs.mjs', ['logs.mjs', 'text/javascript']],
+          ['logs.utils.mjs', ['logs.utils.mjs', 'text/javascript']],
+          ['styles.css', ['styles.css', 'text/css']],
+        ])
+        const studioLogsFile = path.startsWith('/_platform/api/logs/')
+          ? path.slice('/_platform/api/logs/'.length)
+          : undefined
+        const databaseSettingsRoute = path.match(
+          /^\/_platform\/api\/database-settings(?:\/(password|bans|operations\/[a-f0-9-]{36}))?$/
+        )
+        if (
+          (path === '/_platform/api/projects' && request.method === 'GET') ||
+          studioLogsFile ||
+          databaseSettingsRoute ||
+          path === storageConfigPath ||
+          path === storageCredentialsPath
+        ) {
           const host = request.headers.host
           const hostname =
             typeof host === 'string' && config.local
@@ -224,6 +248,163 @@ export function managementServer(pool, config, oidc) {
           )
           invariant(subject, 401, 'Open Studio from the project dashboard')
           await projectAccess(pool, subject, id, 'studio')
+          if (databaseSettingsRoute) {
+            await projectAccess(pool, subject, id, 'operate')
+            const action = databaseSettingsRoute[1]
+            if (action?.startsWith('operations/') && request.method === 'GET') {
+              const operation = (
+                await pool.query(
+                  "SELECT id,state,error_code FROM control.operations WHERE id=$1 AND project_id=$2 AND kind='rotate-password'",
+                  [action.slice('operations/'.length), id]
+                )
+              ).rows[0]
+              invariant(operation, 404, 'Password reset operation not found')
+              return send(response, 200, operation)
+            }
+            if (action === 'password' && request.method === 'POST') {
+              verifyOrigin(request, publicUrl(config, hostname))
+              invariant(
+                limits.sensitive.take(`${subject}:password:${id}`),
+                429,
+                'Too many password reset requests. Wait a moment and try again.'
+              )
+              const operation = await requestOperation(
+                pool,
+                config,
+                subject,
+                id,
+                'rotate-password',
+                await body(request),
+                request.headers['idempotency-key']
+              )
+              return send(response, 202, { id: operation.id, state: operation.state })
+            }
+            if (action === 'bans' && request.method === 'DELETE') {
+              verifyOrigin(request, publicUrl(config, hostname))
+              invariant(
+                limits.mutation.take(`${subject}:database:${id}`),
+                429,
+                'Too many database updates. Wait a moment and try again.'
+              )
+              return send(
+                response,
+                200,
+                await liveRequest(pool, {
+                  subject,
+                  project: id,
+                  kind: 'database-clear-bans',
+                  payload: { addresses: (await body(request)).addresses },
+                })
+              )
+            }
+            if (!action && request.method === 'GET')
+              return send(
+                response,
+                200,
+                await liveRequest(pool, { subject, project: id, kind: 'database-settings' })
+              )
+            if (!action && request.method === 'PATCH') {
+              verifyOrigin(request, publicUrl(config, hostname))
+              invariant(
+                limits.mutation.take(`${subject}:database:${id}`),
+                429,
+                'Too many database updates. Wait a moment and try again.'
+              )
+              const settings = databaseSettingsPatch(await body(request))
+              const result = await liveRequest(pool, {
+                subject,
+                project: id,
+                kind: 'database-settings-update',
+                payload: { settings },
+              })
+              await audit(pool, subject, 'project.database-settings.updated', id, {
+                fields: Object.keys(settings),
+              })
+              return send(response, 200, result)
+            }
+            invariant(false, 405, 'Method not allowed')
+          }
+          if (studioLogsFile) {
+            await projectAccess(pool, subject, id, 'operate')
+            invariant(request.method === 'GET', 405, 'Method not allowed')
+            if (studioLogsFile === 'entries') {
+              invariant(
+                limits.logs.take(`${subject}:${id}`),
+                429,
+                'Too many log requests. Wait a moment and try again.'
+              )
+              const filters = Object.fromEntries(url.searchParams)
+              logsInput(filters)
+              return send(
+                response,
+                200,
+                await liveRequest(pool, { subject, project: id, kind: 'logs', payload: filters })
+              )
+            }
+            const asset = studioLogsAssets.get(studioLogsFile)
+            invariant(asset, 404, 'Log resource not found')
+            response.setHeader('Content-Type', asset[1])
+            response.setHeader(
+              'Content-Security-Policy',
+              "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'"
+            )
+            response.end(await readFile(new URL(`../public/${asset[0]}`, import.meta.url)))
+            return
+          }
+          if (path === storageConfigPath) {
+            invariant(['GET', 'PATCH'].includes(request.method), 405, 'Method not allowed')
+            if (request.method === 'PATCH') {
+              verifyOrigin(request, publicUrl(config, hostname))
+              const settings = storagePatch(await body(request))
+              invariant(
+                limits.mutation.take(`${subject}:storage:${id}`),
+                429,
+                'Too many storage updates. Wait a moment and try again.'
+              )
+              return send(
+                response,
+                200,
+                await liveRequest(pool, {
+                  subject,
+                  project: id,
+                  kind: 'storage-update',
+                  payload: { settings },
+                })
+              )
+            }
+            return send(
+              response,
+              200,
+              await liveRequest(pool, { subject, project: id, kind: 'storage-config' })
+            )
+          }
+          if (path === storageCredentialsPath) {
+            invariant(
+              request.method === 'GET',
+              405,
+              'Self-hosted S3 credentials are managed by the host'
+            )
+            await projectAccess(pool, subject, id, 'secrets')
+            invariant(
+              limits.sensitive.take(`${subject}:storage:${id}`),
+              429,
+              'Too many credential requests. Wait a moment and try again.'
+            )
+            const row = (
+              await pool.query('SELECT encrypted_secrets FROM control.projects WHERE id=$1', [id])
+            ).rows[0]
+            const secrets = unseal(row.encrypted_secrets, config.key, id)
+            return send(response, 200, {
+              data: [
+                {
+                  id: 'configured',
+                  description: 'Host-managed access key',
+                  access_key: secrets.S3_PROTOCOL_ACCESS_KEY_ID,
+                  secret_key: secrets.S3_PROTOCOL_ACCESS_KEY_SECRET,
+                },
+              ],
+            })
+          }
           const { projects } = await listProjects(pool, config, subject, '', 100)
           return send(response, 200, {
             projects: projects.map(({ id, name, status }) => ({ id, name, status })),

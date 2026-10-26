@@ -2,6 +2,8 @@
 
 Temporary tracking doc. Delete once migration is done.
 
+- [x] `/api/platform/projects/$ref/config/storage` — self-hosted Storage configuration fallback (GET, PATCH)
+
 **Runtime model — Next.js and TanStack Start run side-by-side**
 
 Throughout this migration both runtimes coexist in the same workspace:

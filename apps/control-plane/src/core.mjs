@@ -225,6 +225,7 @@ export function rateLimiter({ capacity, perMinute, maxKeys = 10000, now = Date.n
   }
 }
 export function operationAction(kind) {
+  if (kind === 'rotate-password') return 'secrets'
   if (kind === 'delete') return 'delete'
   if (kind === 'restore' || kind === 'recover') return 'restore'
   if (['upgrade', 'rollback'].includes(kind)) return 'restore'

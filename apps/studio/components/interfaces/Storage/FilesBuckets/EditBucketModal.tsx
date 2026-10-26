@@ -72,7 +72,7 @@ const formId = 'edit-storage-bucket-form'
 export const EditBucketModal = ({ visible, bucket, onClose }: EditBucketModalProps) => {
   const { ref } = useParams()
 
-  const { data } = useProjectStorageConfigQuery({ projectRef: ref }, { enabled: IS_PLATFORM })
+  const { data } = useProjectStorageConfigQuery({ projectRef: ref })
   const { value, unit } = convertFromBytes(data?.fileSizeLimit ?? 0)
   const formattedGlobalUploadLimit = `${value} ${unit}`
 

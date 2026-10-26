@@ -68,7 +68,7 @@ export const CreateBucketModal = ({ open, onOpenChange }: CreateBucketModalProps
   const [selectedUnit, setSelectedUnit] = useState<string>(StorageSizeUnits.MB)
   const [hasAllowedMimeTypes, setHasAllowedMimeTypes] = useState(false)
 
-  const { data } = useProjectStorageConfigQuery({ projectRef: ref }, { enabled: IS_PLATFORM })
+  const { data } = useProjectStorageConfigQuery({ projectRef: ref })
   const { value, unit } = convertFromBytes(data?.fileSizeLimit ?? 0)
   const formattedGlobalUploadLimit = `${value} ${unit}`
 
