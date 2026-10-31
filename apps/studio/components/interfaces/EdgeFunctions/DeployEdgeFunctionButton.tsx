@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from 'ui'
 
+import { useCanManageEdgeFunctions } from './useCanManageEdgeFunctions'
 import { SIDEBAR_KEYS } from '@/components/layouts/ProjectLayout/LayoutSidebar/LayoutSidebarProvider'
 import { ButtonTooltip } from '@/components/ui/ButtonTooltip'
 import { useIsProjectActive } from '@/hooks/misc/useSelectedProject'
@@ -26,6 +27,33 @@ export const DeployEdgeFunctionButton = () => {
   const [, setCreateMethod] = useQueryState('create', parseAsString)
 
   const isProjectActive = useIsProjectActive()
+  const { canManageFunctions, isSelfHosted } = useCanManageEdgeFunctions()
+  const disabledTooltip = {
+    content: {
+      side: 'bottom' as const,
+      text: !isProjectActive ? 'Unable to deploy function as project is inactive' : undefined,
+    },
+  }
+
+  if (!canManageFunctions) return null
+
+  // Self-hosted Studio deploys from the browser editor; the CLI and Assistant flows
+  // need Supabase's Management API.
+  if (isSelfHosted)
+    return (
+      <ButtonTooltip
+        variant="primary"
+        icon={<CodeIcon />}
+        disabled={!isProjectActive}
+        tooltip={disabledTooltip}
+        onClick={() => {
+          router.push(`/project/${ref}/functions/new`)
+          track('edge_function_via_editor_button_clicked', { origin: 'secondary_action' })
+        }}
+      >
+        Deploy a new function
+      </ButtonTooltip>
+    )
 
   return (
     <DropdownMenu>

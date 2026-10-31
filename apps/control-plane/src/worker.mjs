@@ -1,0 +1,431 @@
+import { pathToFileURL } from 'node:url'
+import { readFile } from 'node:fs/promises'
+import { configuration } from './config.mjs'
+import { database, audit, roleFor, transaction } from './database.mjs'
+import { authorize, invariant, operationAction, hash } from './core.mjs'
+import { enqueue } from './service.mjs'
+import { Infrastructure } from './infrastructure.mjs'
+import { pollGithub, runDeployment } from './github.mjs'
+import { serveLiveRequests } from './live.mjs'
+import { ProjectDatabase } from './project-db.mjs'
+import { projectHealth } from './health.mjs'
+import { ProjectObservability } from './observability.mjs'
+import { ProjectLogs } from './logs.mjs'
+import { ProjectStorage } from './storage.mjs'
+import { ProjectDatabaseSettings } from './database-settings.mjs'
+
+const safeErrorCodes = new Set([
+  'COMMAND_FAILED',
+  'COMMAND_TIMEOUT',
+  'COMMAND_OUTPUT_LIMIT',
+  'BACKUPS_NOT_CONFIGURED',
+  'BACKUP_REPOSITORY_UNAVAILABLE',
+  'DOMAIN_NOT_FOUND',
+  'DOMAIN_NOT_VERIFIED',
+  'BACKUP_RELEASE_MISMATCH',
+  'INVALID_RELEASE',
+  'INVALID_RELEASE_MANIFEST',
+  'RELEASE_CHECKSUM_MISMATCH',
+  'IMAGE_DIGEST_REQUIRED',
+  'IMAGE_DIGEST_UNAVAILABLE',
+  'DATABASE_UPGRADE_REQUIRES_MIGRATION_RUNBOOK',
+  'RELEASE_NOT_COMPATIBLE',
+  'ROLLBACK_NOT_APPROVED',
+  'RESTORE_MANIFEST_MISMATCH',
+  'MANUAL_RECOVERY_REQUIRED',
+  'PROJECT_DELETED',
+  'BACKUP_SNAPSHOT_MISSING',
+  'DEPLOYMENT_FAILED',
+  'GITHUB_NOT_LINKED',
+  'PROJECT_PAUSED',
+])
+// System actors queue work on a project's behalf; their own permissions are not checked.
+const systemOperations = { '@scheduler': ['backup'], '@github': ['deploy'] }
+
+export async function runOne(pool, config, infrastructure) {
+  // A session advisory lock is held throughout each operation. Another worker
+  // can resume a crashed job only after PostgreSQL releases that connection.
+  const candidates = (
+    await pool.query(
+      "SELECT id,project_id FROM control.operations WHERE state IN ('queued','running') AND retry_at<=now() ORDER BY created_at LIMIT 50"
+    )
+  ).rows
+  for (const candidate of candidates) {
+    const db = await pool.connect()
+    let locked = false
+    try {
+      locked = (
+        await db.query('SELECT pg_try_advisory_lock(hashtextextended($1,8734144)) AS locked', [
+          candidate.project_id,
+        ])
+      ).rows[0].locked
+      if (!locked) continue
+      const operation = await transaction(db, async (client) => {
+        const row = (
+          await client.query(
+            "SELECT * FROM control.operations WHERE project_id=$1 AND state IN ('queued','running') ORDER BY created_at,id LIMIT 1 FOR UPDATE",
+            [candidate.project_id]
+          )
+        ).rows[0]
+        if (!row || new Date(row.retry_at).getTime() > Date.now()) return undefined
+        await client.query(
+          "UPDATE control.operations SET state='running', attempts=attempts+1, started_at=now(),error_code=NULL WHERE id=$1",
+          [row.id]
+        )
+        return { ...row, attempts: row.attempts + 1 }
+      })
+      if (!operation) continue
+      console.log(
+        JSON.stringify({
+          event: 'operation.started',
+          operation: operation.id,
+          project: operation.project_id,
+          kind: operation.kind,
+          attempt: operation.attempts,
+        })
+      )
+      try {
+        invariant(
+          !(['restore', 'upgrade', 'rollback'].includes(operation.kind) && operation.attempts > 1),
+          409,
+          'MANUAL_RECOVERY_REQUIRED'
+        )
+        if (!systemOperations[operation.actor]?.includes(operation.kind))
+          authorize(
+            await roleFor(db, operation.actor, operation.project_id),
+            operationAction(operation.kind)
+          )
+        const project = (
+          await db.query('SELECT * FROM control.projects WHERE id=$1', [operation.project_id])
+        ).rows[0]
+        invariant(
+          project &&
+            (project.status !== 'deleted' || ['delete', 'recover'].includes(operation.kind)),
+          404,
+          'PROJECT_DELETED'
+        )
+        const kind = operation.kind
+        if (['create', 'start', 'restart', 'recover', 'resize'].includes(kind)) {
+          if (kind === 'resize') await infrastructure.invalidate(project)
+          if (['restart', 'resize'].includes(kind)) await infrastructure.stop(project)
+          await infrastructure.up(project)
+        } else if (kind === 'rotate-password')
+          await new ProjectDatabaseSettings(infrastructure, config).rotatePassword(
+            project,
+            operation.payload.encryptedPassword
+          )
+        else if (kind === 'stop') await infrastructure.stop(project)
+        else if (kind === 'delete') await infrastructure.destroy(project)
+        else if (kind === 'backup')
+          await infrastructure.backup(
+            project,
+            operation.actor === '@scheduler' ? 'scheduled' : 'manual'
+          )
+        else if (kind === 'inspect') await recordInspection(db, infrastructure, project)
+        else if (kind === 'deploy')
+          await runDeployment({
+            db,
+            config,
+            projectDb: infrastructure.projectDb ?? new ProjectDatabase(config, infrastructure),
+            project,
+            operation,
+          })
+        else if (kind === 'restore')
+          await infrastructure.restore(project, operation.payload.backupId)
+        else if (kind === 'verify-domain')
+          await infrastructure.verifyDomain(project, operation.payload.domain)
+        else if (kind === 'remove-domain')
+          await infrastructure.removeDomain(project, operation.payload.domain)
+        else if (kind === 'upgrade' || kind === 'rollback')
+          await infrastructure.changeRelease(
+            project,
+            operation.payload.release,
+            kind === 'rollback'
+          )
+        else throw new Error('UNSUPPORTED_OPERATION')
+        await transaction(db, async (client) => {
+          const state = {
+            create: 'ready',
+            start: 'ready',
+            restart: 'ready',
+            recover: 'ready',
+            resize: 'ready',
+            'rotate-password': 'ready',
+            stop: 'stopped',
+            delete: 'deleted',
+          }[kind]
+          if (state)
+            await client.query(
+              'UPDATE control.projects SET status=$2,desired_state=$3 WHERE id=$1',
+              [project.id, state, state === 'ready' ? 'running' : state]
+            )
+          await client.query(
+            "UPDATE control.operations SET state='succeeded',finished_at=now() WHERE id=$1",
+            [operation.id]
+          )
+          await audit(client, operation.actor, `project.${kind}.succeeded`, project.id, {
+            operationId: operation.id,
+          })
+          // One-click provisioning: deploy the linked repository, seed included.
+          if (kind === 'create') {
+            const link = (
+              await client.query('SELECT * FROM control.github_links WHERE project_id=$1', [
+                project.id,
+              ])
+            ).rows[0]
+            if (link)
+              await enqueue(client, {
+                actor: '@github',
+                project: project.id,
+                kind: 'deploy',
+                payload: { source: 'provision', seed: true },
+                key: `provision-${project.id}`,
+                requestHash: hash(`provision-${project.id}`),
+              })
+          }
+          if (kind === 'delete') {
+            await client.query('DELETE FROM control.sessions WHERE project_id=$1', [project.id])
+            await client.query('DELETE FROM control.domains WHERE project_id=$1', [project.id])
+          }
+        })
+      } catch (error) {
+        const errorCode =
+          error.status === 403
+            ? 'PERMISSION_REVOKED'
+            : safeErrorCodes.has(error.message)
+              ? error.message
+              : 'OPERATION_FAILED'
+        console.error(
+          JSON.stringify({
+            event: 'operation.failed',
+            operation: operation.id,
+            project: operation.project_id,
+            code: errorCode,
+            step: error.step,
+            // Local mode only: subprocess output can contain credentials on servers.
+            ...(config.local ? { detail: error.stderr || error.message } : {}),
+          })
+        )
+        const retry =
+          operation.attempts < 3 &&
+          !error.status &&
+          !['restore', 'upgrade', 'rollback'].includes(operation.kind)
+        await transaction(db, async (client) => {
+          await client.query(
+            "UPDATE control.operations SET state=$2,error_code=$3,retry_at=now()+interval '30 seconds',finished_at=CASE WHEN $2='failed' THEN now() ELSE NULL END WHERE id=$1",
+            [operation.id, retry ? 'queued' : 'failed', errorCode]
+          )
+          if (
+            !retry &&
+            [
+              'create',
+              'start',
+              'restart',
+              'stop',
+              'delete',
+              'recover',
+              'restore',
+              'upgrade',
+              'rollback',
+              'resize',
+            ].includes(operation.kind) &&
+            error.status !== 403
+          )
+            await client.query(
+              "UPDATE control.projects SET status='error' WHERE id=$1 AND status<>'deleted'",
+              [operation.project_id]
+            )
+          await audit(
+            client,
+            operation.actor,
+            `project.${operation.kind}.failed`,
+            operation.project_id,
+            { operationId: operation.id, retry }
+          )
+        })
+      }
+      return true
+    } finally {
+      if (locked)
+        await db.query('SELECT pg_advisory_unlock(hashtextextended($1,8734144))', [
+          candidate.project_id,
+        ])
+      db.release()
+    }
+  }
+  return false
+}
+// Collects insights and records a failure instead of throwing, so a broken collector
+// never marks the project unhealthy.
+async function recordInspection(db, infrastructure, project) {
+  try {
+    await infrastructure.inspect(project)
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: 'inspection.failed',
+        project: project.id,
+        step: error.step,
+        ...(infrastructure.config?.local ? { detail: error.stderr || error.message } : {}),
+      })
+    )
+    await db.query(
+      `INSERT INTO control.project_insights(project_id,error_code,collected_at) VALUES($1,'INSPECTION_FAILED',now())
+       ON CONFLICT (project_id) DO UPDATE SET error_code='INSPECTION_FAILED', collected_at=now()`,
+      [project.id]
+    )
+  }
+}
+export async function observe(pool, infrastructure, config = {}, observability) {
+  const projects = (
+    await pool.query(
+      "SELECT * FROM control.projects WHERE status IN ('ready','error') AND desired_state='running' ORDER BY last_observed_at NULLS FIRST LIMIT 20"
+    )
+  ).rows
+  for (const project of projects) {
+    const db = await pool.connect()
+    let locked = false
+    try {
+      locked = (
+        await db.query('SELECT pg_try_advisory_lock(hashtextextended($1,8734144)) AS locked', [
+          project.id,
+        ])
+      ).rows[0].locked
+      if (!locked) continue
+      try {
+        const health = projectHealth(await infrastructure.metrics(project), project.metrics)
+        await db.query(
+          'UPDATE control.projects SET metrics=$2,last_observed_at=now(),status=$3 WHERE id=$1',
+          [project.id, health.metrics, health.status]
+        )
+        if (health.serving) {
+          // Recreating Traefik drops networks joined at runtime; rejoin before routing.
+          await infrastructure.attachIngress(project)
+          await infrastructure.route(project)
+          try {
+            await observability?.record(project, health.metrics)
+          } catch (error) {
+            console.error(
+              JSON.stringify({
+                event: 'observability.failed',
+                project: project.id,
+                error: error.message,
+              })
+            )
+          }
+          const insights = (
+            await db.query(
+              'SELECT collected_at FROM control.project_insights WHERE project_id=$1',
+              [project.id]
+            )
+          ).rows[0]
+          const due = (config.insightsMinutes ?? 5) * 60000
+          if (!insights?.collected_at || Date.now() - new Date(insights.collected_at) >= due)
+            await recordInspection(db, infrastructure, project)
+        } else await infrastructure.unroute(project)
+      } catch {
+        await db.query(
+          "UPDATE control.projects SET last_observed_at=now(),metrics=jsonb_build_object('error','OBSERVATION_FAILED') WHERE id=$1",
+          [project.id]
+        )
+      }
+    } finally {
+      if (locked)
+        await db.query('SELECT pg_advisory_unlock(hashtextextended($1,8734144))', [project.id])
+      db.release()
+    }
+  }
+}
+// Queues a backup for each project whose own interval has elapsed. Failed attempts
+// also count, so a broken repository is retried once per interval, not every minute.
+export async function scheduleBackups(pool) {
+  if (!process.env.RESTIC_REPOSITORY || !process.env.RESTIC_PASSWORD_FILE) return
+  const projects = (
+    await pool.query(
+      `SELECT p.id, p.backup_interval_hours AS hours FROM control.projects p
+    WHERE p.status IN ('ready','stopped') AND p.backup_interval_hours > 0
+    AND NOT EXISTS(SELECT 1 FROM control.operations o WHERE o.project_id=p.id AND o.kind='backup'
+      AND (o.state IN ('queued','running') OR o.created_at>now()-(p.backup_interval_hours*interval '1 hour')))
+    AND NOT EXISTS(SELECT 1 FROM control.backups b WHERE b.project_id=p.id
+      AND b.created_at>now()-(p.backup_interval_hours*interval '1 hour'))`
+    )
+  ).rows
+  for (const project of projects)
+    await transaction(pool, async (db) => {
+      const key = `scheduled-${project.id}-${Math.floor(Date.now() / (project.hours * 3600000))}`
+      await enqueue(db, {
+        actor: '@scheduler',
+        project: project.id,
+        kind: 'backup',
+        key,
+        requestHash: hash(key),
+      })
+    })
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const config = await configuration()
+  if (process.env.AWS_SECRET_ACCESS_KEY_FILE)
+    process.env.AWS_SECRET_ACCESS_KEY = (
+      await readFile(process.env.AWS_SECRET_ACCESS_KEY_FILE, 'utf8')
+    ).trim()
+  invariant(
+    config.workerEnabled,
+    500,
+    'Set ENABLE_DOCKER_WORKER=true only on the private execution service'
+  )
+  const pool = database(config.databaseUrl)
+  const infrastructure = new Infrastructure(config, pool)
+  const projectDb = new ProjectDatabase(config, infrastructure)
+  infrastructure.projectDb = projectDb
+  const projectLogs = new ProjectLogs(config)
+  const projectStorage = new ProjectStorage(infrastructure)
+  const databaseSettings = new ProjectDatabaseSettings(infrastructure, config)
+  const observability = new ProjectObservability(pool, infrastructure)
+  // Interactive requests (SQL, types, functions) run beside the operation queue.
+  const live = serveLiveRequests(pool, {
+    sql: (project, payload, options) => projectDb.sql(project, payload, options),
+    types: (project, payload) => projectDb.types(project, payload),
+    functions: (project, payload) => projectDb.functions(project, payload),
+    logs: (project, payload) => projectLogs.read(project, payload),
+    'storage-config': (project) => projectStorage.read(project),
+    'storage-update': (project, payload) => projectStorage.update(project, payload.settings),
+    'database-settings': (project) => databaseSettings.read(project),
+    'database-settings-update': (project, payload) =>
+      databaseSettings.update(project, payload.settings),
+    'database-clear-bans': (project, payload) =>
+      databaseSettings.clearBans(project, payload.addresses),
+    'deploy-function': (project, payload) => projectDb.deployFunction(project, payload),
+    migrations: (project) => projectDb.migrations(project),
+    'apply-migration': (project, payload) => projectDb.applyNamedMigration(project, payload),
+  })
+  let stopping = false,
+    lastObservation = 0,
+    lastGithubPoll = 0
+  for (const signal of ['SIGTERM', 'SIGINT'])
+    process.on(signal, () => {
+      stopping = true
+    })
+  console.log(JSON.stringify({ event: 'worker.started' }))
+  while (!stopping) {
+    try {
+      await runOne(pool, config, infrastructure)
+      if (Date.now() - lastGithubPoll > 15000) {
+        await pollGithub(pool, config)
+        lastGithubPoll = Date.now()
+      }
+      if (Date.now() - lastObservation > 60000) {
+        await observe(pool, infrastructure, config, observability)
+        await scheduleBackups(pool)
+        await pool.query('DELETE FROM control.sessions WHERE expires_at<now()')
+        await pool.query('DELETE FROM control.login_flows WHERE expires_at<now()')
+        await pool.query('DELETE FROM control.studio_tickets WHERE expires_at<now()')
+        lastObservation = Date.now()
+      }
+    } catch {
+      console.error(JSON.stringify({ event: 'worker.cycle.failed' }))
+    }
+    if (!stopping) await new Promise((resolve) => setTimeout(resolve, 2000))
+  }
+  await live.stop()
+  await pool.end()
+}

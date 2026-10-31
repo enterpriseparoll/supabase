@@ -4,7 +4,6 @@ import { generateAuthMenu, GenerateAuthMenuOptions } from './AuthLayout.utils'
 
 const allFeaturesEnabled: GenerateAuthMenuOptions = {
   ref: 'test-ref',
-  isPlatform: true,
   showOverview: true,
   features: {
     signInProviders: true,
@@ -19,7 +18,6 @@ const allFeaturesEnabled: GenerateAuthMenuOptions = {
 
 const allFeaturesDisabled: GenerateAuthMenuOptions = {
   ref: 'test-ref',
-  isPlatform: true,
   showOverview: false,
   features: {
     signInProviders: false,
@@ -45,7 +43,7 @@ function findItem(menu: ReturnType<typeof generateAuthMenu>, name: string) {
 }
 
 describe('generateAuthMenu', () => {
-  it('platform with all features enabled includes all menu items', () => {
+  it('all features enabled includes all menu items', () => {
     const menu = generateAuthMenu(allFeaturesEnabled)
     const names = flatItemNames(menu)
 
@@ -66,7 +64,7 @@ describe('generateAuthMenu', () => {
     expect(names).toContain('Performance')
   })
 
-  it('platform with all features disabled shows only core items', () => {
+  it('all features disabled shows only core items', () => {
     const menu = generateAuthMenu(allFeaturesDisabled)
     const names = flatItemNames(menu)
 
@@ -87,23 +85,6 @@ describe('generateAuthMenu', () => {
     expect(names).not.toContain('Multi-Factor')
     expect(names).not.toContain('Attack Protection')
     expect(names).not.toContain('Performance')
-  })
-
-  it('self-hosted hides OAuth Apps, Notifications, and platform-only Configuration items', () => {
-    const menu = generateAuthMenu({
-      ...allFeaturesEnabled,
-      isPlatform: false,
-    })
-    const names = flatItemNames(menu)
-    const groupTitles = menu.map((g) => g.title)
-
-    expect(names).not.toContain('OAuth Apps')
-    expect(groupTitles).not.toContain('Notifications')
-
-    // Configuration should only have Policies
-    const configGroup = menu.find((g) => g.title === 'Configuration')!
-    expect(configGroup.items).toHaveLength(1)
-    expect(configGroup.items[0].name).toBe('Policies')
   })
 
   it('shows Overview when showOverview is true', () => {

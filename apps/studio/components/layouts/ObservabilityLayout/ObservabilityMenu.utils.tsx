@@ -47,7 +47,8 @@ export const useGenerateObservabilityMenu = () => {
   const preservedQueryParams = usePreservedQueryParams()
   const { isSupamonitorEnabled } = useSupamonitorStatus()
 
-  const showOverview = useFlag('observabilityOverview')
+  // Self-hosted projects get the overview from the platform's own metrics.
+  const showOverview = useFlag('observabilityOverview') || !IS_PLATFORM
   const storageSupported = useIsFeatureEnabled('project_storage:all')
 
   const baseUrl = `/project/${ref}/observability`
@@ -149,13 +150,13 @@ export const useGenerateObservabilityMenu = () => {
     },
   ]
 
-  if (IS_PLATFORM) {
-    sections.push({
-      title: 'PRODUCT',
-      key: 'product-section',
-      items: productItems,
-    })
-  }
+  // Self-hosted projects have no logs analytics service, which the other product
+  // reports query; the Database report uses the platform's own metrics.
+  sections.push({
+    title: 'PRODUCT',
+    key: 'product-section',
+    items: IS_PLATFORM ? productItems : productItems.filter((item) => item.key === 'database'),
+  })
 
   return sections
 }

@@ -30,7 +30,6 @@ import { InlineLink } from '@/components/ui/InlineLink'
 import { ShortcutTooltip } from '@/components/ui/ShortcutTooltip'
 import { useProjectStorageConfigQuery } from '@/data/config/project-storage-config-query'
 import { usePaginatedBucketsQuery } from '@/data/storage/buckets-query'
-import { IS_PLATFORM } from '@/lib/constants'
 import { formatBytes } from '@/lib/helpers'
 import { SHORTCUT_IDS } from '@/state/shortcuts/registry'
 import { useStorageExplorerStateSnapshot } from '@/state/storage-explorer'
@@ -53,7 +52,7 @@ export const FilesBuckets = () => {
     parseAsBoolean.withDefault(false).withOptions({ history: 'push', clearOnDefault: true })
   )
 
-  const { data } = useProjectStorageConfigQuery({ projectRef: ref }, { enabled: IS_PLATFORM })
+  const { data } = useProjectStorageConfigQuery({ projectRef: ref })
   const {
     data: bucketsData,
     error: bucketsError,

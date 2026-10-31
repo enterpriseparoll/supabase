@@ -1,0 +1,29 @@
+{
+  "name": "@supabase/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "worker": "node src/worker.mjs",
+    "migrate": "node src/cli.mjs migrate",
+    "test": "node --test test/*.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs",
+    "lint": "node scripts/check.mjs && prettier --check .",
+    "format": "prettier --write .",
+    "build": "tailwindcss -i public/input.css -o public/styles.css --minify"
+  },
+  "dependencies": {
+    "jose": "6.1.0",
+    "pg": "8.16.3",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.1.13",
+    "prettier": "3.6.2",
+    "tailwindcss": "4.1.13"
+  }
+}

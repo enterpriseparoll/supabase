@@ -28,6 +28,8 @@ interface FileExplorerAndEditorProps {
 
   selectedFileId?: number
   setSelectedFileId?: (id: number) => void
+  /** Whether files can be added and edited. Defaults to the platform only. */
+  canEdit?: boolean
 }
 
 const denoJsonDefaultContent = JSON.stringify({ imports: {} }, null, '\t')
@@ -39,6 +41,7 @@ export const FileExplorerAndEditor = ({
   aiMetadata,
   selectedFileId: extSelectedFileId,
   setSelectedFileId: extSetSelectedFileId,
+  canEdit = IS_PLATFORM,
 }: FileExplorerAndEditorProps) => {
   const [isDragOver, setIsDragOver] = useState(false)
   const [_selectedFileId, _setSelectedFileId] = useState<number>(files[0]?.id)
@@ -397,7 +400,7 @@ export const FileExplorerAndEditor = ({
           <h3 className="text-sm font-normal font-mono uppercase text-lighter tracking-wide">
             Files
           </h3>
-          {IS_PLATFORM && (
+          {canEdit && (
             <Button size="tiny" icon={<PlusIcon size={14} />} onClick={addNewFile}>
               Add File
             </Button>
@@ -440,7 +443,7 @@ export const FileExplorerAndEditor = ({
               padding: { top: 20, bottom: 20 },
               lineNumbersMinChars: 3,
               fixedOverflowWidgets: true,
-              readOnly: !IS_PLATFORM,
+              readOnly: !canEdit,
             }}
           />
         )}

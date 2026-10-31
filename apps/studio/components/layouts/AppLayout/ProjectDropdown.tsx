@@ -10,6 +10,8 @@ import { ShimmeringLoader } from 'ui-patterns/ShimmeringLoader'
 import { AppLayoutDropdownTriggerButton } from './AppLayoutDropdown'
 import { sanitizeRoute } from './ProjectDropdown.utils'
 import { ProjectRowLink } from './ProjectRowLink'
+import { SelfHostedProjectSwitcher } from './SelfHostedProjectSwitcher'
+import { getSelfHostedPlatformContext } from './SelfHostedProjectSwitcher.utils'
 import { useEmbeddedCloseHandler } from './useEmbeddedCloseHandler'
 import { CommandItemLink } from '@/components/ui/CommandItemLink'
 import { OrganizationProjectSelector } from '@/components/ui/OrganizationProjectSelector'
@@ -64,6 +66,9 @@ function ProjectDropdownNewProjectActions({
 }
 
 const ProjectDropdownNonPlatformView = ({ projectName }: { projectName: string }) => {
+  const platform =
+    typeof window === 'undefined' ? undefined : getSelfHostedPlatformContext(window.location)
+  if (platform) return <SelfHostedProjectSwitcher projectName={projectName} platform={platform} />
   return <div className="text-sm px-3 py-1">{projectName}</div>
 }
 

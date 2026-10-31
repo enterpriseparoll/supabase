@@ -719,6 +719,8 @@ export const getReportAttributesV2: (
           tooltip: 'Disk Size refers to the total space your project occupies on disk',
         },
         entitledFeatures.includes('database') &&
+          // No disk size yet (or a self-hosted disk): no threshold line to draw.
+          typeof diskConfig?.attributes?.size_gb === 'number' &&
           (isSpendCapEnabled
             ? {
                 attribute: 'pg_database_size_percent_paid_spendCap',

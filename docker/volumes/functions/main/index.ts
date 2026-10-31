@@ -4,6 +4,33 @@ console.log('main function started')
 
 const MAX_WORKER_RETRIES = 3
 
+// Custom secrets managed from Studio (Edge Functions > Secrets) live beside the
+// functions. Read again only when the file changes.
+const SECRETS_PATH = '/home/deno/functions/.secrets.json'
+let secretsCache: { mtime: number; values: Record<string, string> } = { mtime: -1, values: {} }
+async function customSecrets() {
+  try {
+    const info = await Deno.stat(SECRETS_PATH)
+    const mtime = info.mtime?.getTime() ?? 0
+    if (mtime !== secretsCache.mtime) {
+      const parsed = JSON.parse(await Deno.readTextFile(SECRETS_PATH))
+      const values: Record<string, string> = {}
+      for (const [name, entry] of Object.entries(parsed ?? {}))
+        if (
+          typeof (entry as { value?: unknown })?.value === 'string' &&
+          !name.toUpperCase().startsWith('SUPABASE_')
+        )
+          values[name] = (entry as { value: string }).value
+      secretsCache = { mtime, values }
+    }
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) console.error('cannot read function secrets', e)
+    if (e instanceof Deno.errors.NotFound) secretsCache = { mtime: 0, values: {} }
+  }
+  return secretsCache
+}
+const workerVersions = new Map<string, string>()
+
 const JWT_SECRET = Deno.env.get('JWT_SECRET')
 const SUPABASE_JWKS = parseJwks(Deno.env.get('SUPABASE_JWKS'))
 const LOCAL_JWKS = SUPABASE_JWKS ? jose.createLocalJWKSet(SUPABASE_JWKS) : null
@@ -317,8 +344,9 @@ Deno.serve(async (req: Request) => {
   const servicePath = `/home/deno/functions/${service_name}`
   console.error(`serving the request with ${servicePath}`)
 
+  let serviceInfo: Deno.FileInfo
   try {
-    const serviceInfo = await Deno.stat(servicePath)
+    serviceInfo = await Deno.stat(servicePath)
     if (!serviceInfo.isDirectory) {
       return getFunctionErrorResponse({
         code: RequestErrors.NotFound,
@@ -353,7 +381,18 @@ Deno.serve(async (req: Request) => {
   // SUPABASE_FUNCTION_SLUG is listed after the container env snapshot so
   // nothing in it can shadow the value, and it is per-request because only this
   // worker knows which function the request resolved to.
-  const envVarsObj = { ...Deno.env.toObject(), SUPABASE_FUNCTION_SLUG: service_name }
+  const secrets = await customSecrets()
+  const envVarsObj = {
+    ...Deno.env.toObject(),
+    ...secrets.values,
+    SUPABASE_FUNCTION_SLUG: service_name,
+  }
+  // Deploys replace the whole function folder (new mtime) and secrets edits replace
+  // the secrets file, so a changed version means this function needs a new worker.
+  const version = `${serviceInfo.mtime?.getTime() ?? 0}:${secrets.mtime}`
+  const forceCreate =
+    workerVersions.has(service_name) && workerVersions.get(service_name) !== version
+  workerVersions.set(service_name, version)
   const envVars = Object.keys(envVarsObj).map((k) => [k, envVarsObj[k]])
 
   const callWorker = async (req: Request, retriesLeft = MAX_WORKER_RETRIES): Promise<Response> => {
@@ -372,6 +411,7 @@ Deno.serve(async (req: Request) => {
         noModuleCache,
         importMapPath,
         envVars,
+        forceCreate,
       })
       // Gateway-minted internal JWT is for this router only; never expose it to user functions.
       const userReq = new Request(req)

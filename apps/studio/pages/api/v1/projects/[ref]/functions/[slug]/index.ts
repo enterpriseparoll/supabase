@@ -2,7 +2,8 @@ import type { components } from 'api-types'
 import { type NextApiRequest, type NextApiResponse } from 'next'
 
 import { apiWrapper } from '@/lib/api/apiWrapper'
-import { getFunctionsArtifactStore } from '@/lib/api/self-hosted/functions'
+import { getFunctionsArtifactStore, getFunctionsManager } from '@/lib/api/self-hosted/functions'
+import { FunctionsManagementError } from '@/lib/api/self-hosted/functions/manage'
 import { uuidv4 } from '@/lib/helpers'
 
 export default function handlerWithErrorCatching(req: NextApiRequest, res: NextApiResponse) {
@@ -15,8 +16,10 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
   switch (method) {
     case 'GET':
       return handleGet(req, res)
+    case 'DELETE':
+      return handleDelete(req, res)
     default:
-      res.setHeader('Allow', ['GET'])
+      res.setHeader('Allow', ['GET', 'DELETE'])
       res.status(405).json({ data: null, error: { message: `Method ${method} Not Allowed` } })
   }
 }
@@ -46,4 +49,19 @@ const handleGet = async (req: NextApiRequest, res: NextApiResponse) => {
   } satisfies EdgeFunctionsResponse
 
   return res.status(200).json(functionResponse)
+}
+
+const handleDelete = async (req: NextApiRequest, res: NextApiResponse) => {
+  const slugParam = req.query.slug
+  const slug = Array.isArray(slugParam) ? slugParam[0] : slugParam
+  try {
+    await getFunctionsManager().remove(slug ?? '')
+    return res.status(200).json({})
+  } catch (error) {
+    if (error instanceof FunctionsManagementError)
+      return res
+        .status(error.status)
+        .json({ message: error.message, error: { message: error.message } })
+    throw error
+  }
 }

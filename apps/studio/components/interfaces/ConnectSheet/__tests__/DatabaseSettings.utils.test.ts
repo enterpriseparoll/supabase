@@ -141,6 +141,41 @@ describe('buildConnectionStringPooler', () => {
     expect(result.ipv4SupportedForDedicatedPooler).toBe(false)
   })
 
+  test('self-hosted: uses the host-supplied tenant user and published pooler ports', () => {
+    const result = buildConnectionStringPooler({
+      deploymentMode: selfHosted,
+      connectionInfo: {
+        db_host: 'localhost',
+        db_port: 55432,
+        db_user: 'postgres.p4eb6d2ee001a0adebc7ac563',
+      },
+      connectionStringsShared: sharedPlatform,
+      ipv4Addon: false,
+      isHighAvailability: false,
+    })
+
+    expect(result.sessionShared).toBe(
+      'postgresql://postgres.p4eb6d2ee001a0adebc7ac563:[YOUR-PASSWORD]@localhost:55432/postgres'
+    )
+    expect(result.transactionShared).toBe(
+      'postgresql://postgres.p4eb6d2ee001a0adebc7ac563:[YOUR-PASSWORD]@localhost:55433/postgres'
+    )
+  })
+
+  test('self-hosted: a plain postgres user keeps the tenant placeholder', () => {
+    const result = buildConnectionStringPooler({
+      deploymentMode: selfHosted,
+      connectionInfo: { db_host: 'supabase.example.com', db_port: 5432, db_user: 'postgres' },
+      connectionStringsShared: sharedPlatform,
+      ipv4Addon: false,
+      isHighAvailability: false,
+    })
+
+    expect(result.transactionShared).toBe(
+      'postgresql://postgres.[POOLER_TENANT_ID]:[YOUR-PASSWORD]@supabase.example.com:6543/postgres'
+    )
+  })
+
   test('self-hosted: uses Supavisor placeholders on 6543/dbPort, direct on dbPort', () => {
     const result = buildConnectionStringPooler({
       deploymentMode: selfHosted,

@@ -29,7 +29,7 @@ import { useS3VectorsWrapperCreateMutation } from '@/data/storage/s3-vectors-wra
 import { useVectorBucketCreateMutation } from '@/data/storage/vector-bucket-create-mutation'
 import { useVectorBucketsQuery } from '@/data/storage/vector-buckets-query'
 import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
-import { DOCS_URL } from '@/lib/constants'
+import { DOCS_URL, IS_PLATFORM } from '@/lib/constants'
 import { useTrack } from '@/lib/telemetry/track'
 
 const FormSchema = z.object({
@@ -127,33 +127,35 @@ export const CreateVectorBucketDialog = ({
       return
     }
 
-    try {
-      if (!wrappersExtension) throw new Error('Unable to find wrappers extension.')
-      if (wrappersExtensionState === 'not-installed') {
-        // when it's not installed, we need to enable the extension and create the wrapper
-        await enableExtension({
-          projectRef: project?.ref!,
-          connectionString: project?.connectionString,
-          name: wrappersExtension.name,
-          schema: wrappersExtension.schema ?? 'extensions',
-          version: wrappersExtension.default_version,
-        })
-      }
+    if (IS_PLATFORM)
+      try {
+        if (!wrappersExtension) throw new Error('Unable to find wrappers extension.')
+        if (wrappersExtensionState === 'not-installed') {
+          // when it's not installed, we need to enable the extension and create the wrapper
+          await enableExtension({
+            projectRef: project?.ref!,
+            connectionString: project?.connectionString,
+            name: wrappersExtension.name,
+            schema: wrappersExtension.schema ?? 'extensions',
+            version: wrappersExtension.default_version,
+          })
+        }
 
-      await createS3VectorsWrapper({ bucketName: values.name })
-      toast.success(`Successfully created vector bucket ${values.name}`)
-    } catch (error: any) {
-      toast.success(
-        <div>
-          <p>Successfully created vector bucket {values.name}</p>
-          <p className="text-foreground-light text-xs">
-            However, bucket integration will need to be manually installed as we ran into an error:
-          </p>
-          <p className="text-foreground-light text-xs">{error.message}</p>
-        </div>,
-        { duration: 8000 }
-      )
-    }
+        await createS3VectorsWrapper({ bucketName: values.name })
+        toast.success(`Successfully created vector bucket ${values.name}`)
+      } catch (error: any) {
+        toast.success(
+          <div>
+            <p>Successfully created vector bucket {values.name}</p>
+            <p className="text-foreground-light text-xs">
+              However, bucket integration will need to be manually installed as we ran into an
+              error:
+            </p>
+            <p className="text-foreground-light text-xs">{error.message}</p>
+          </div>,
+          { duration: 8000 }
+        )
+      }
 
     setIsLoading(false)
     track('storage_bucket_created', { bucketType: 'vector' })
@@ -204,17 +206,19 @@ export const CreateVectorBucketDialog = ({
                 )}
               />
 
-              <Admonition type="default" className="border-x-0 border-b-0 rounded-none">
-                <p>
-                  Supabase will install the{' '}
-                  {wrappersExtensionState !== 'installed' ? 'Wrappers extension and ' : ''}
-                  S3 Vectors Wrapper integration on your behalf.{' '}
-                  <InlineLink href={`${DOCS_URL}/guides/database/extensions/wrappers/s3_vectors`}>
-                    Learn more
-                  </InlineLink>
-                  .
-                </p>
-              </Admonition>
+              {IS_PLATFORM && (
+                <Admonition type="default" className="border-x-0 border-b-0 rounded-none">
+                  <p>
+                    Supabase will install the{' '}
+                    {wrappersExtensionState !== 'installed' ? 'Wrappers extension and ' : ''}
+                    S3 Vectors Wrapper integration on your behalf.{' '}
+                    <InlineLink href={`${DOCS_URL}/guides/database/extensions/wrappers/s3_vectors`}>
+                      Learn more
+                    </InlineLink>
+                    .
+                  </p>
+                </Admonition>
+              )}
             </DialogSection>
           </form>
         </Form>

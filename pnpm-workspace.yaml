@@ -1,5 +1,7 @@
 packages:
   - apps/*
+  # Standalone deployment runtime uses its own npm lockfile and Docker build.
+  - '!apps/control-plane'
   - packages/*
   - blocks/*
   - e2e/*

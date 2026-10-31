@@ -23,7 +23,9 @@ import type { NextPageWithLayout } from '@/types'
 const SecretsPage: NextPageWithLayout = () => {
   const { isCli, isSelfHosted } = useDeploymentMode()
 
-  if (!IS_PLATFORM) {
+  // Self-hosted Studio manages custom secrets in the functions folder; the CLI's
+  // local stack reads them from supabase/functions/.env.
+  if (!IS_PLATFORM && !isSelfHosted) {
     return (
       <PageContainer size="large">
         <PageSection>
@@ -41,18 +43,6 @@ const SecretsPage: NextPageWithLayout = () => {
                 actions={<DocsButton href={`${DOCS_URL}/guides/functions/secrets#using-the-cli`} />}
               />
             )}
-            {isSelfHosted && (
-              <Admonition
-                type="default"
-                title="Self-hosted Supabase"
-                description={<p>Set custom secrets via environment variables.</p>}
-                actions={
-                  <DocsButton
-                    href={`${DOCS_URL}/guides/self-hosting/self-hosted-functions#custom-environment-variables`}
-                  />
-                }
-              />
-            )}
             <section className="space-y-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div className="space-y-1">
@@ -61,13 +51,7 @@ const SecretsPage: NextPageWithLayout = () => {
                     Reserved secrets available in every project
                   </p>
                 </div>
-                <DocsButton
-                  href={
-                    isSelfHosted
-                      ? `${DOCS_URL}/guides/self-hosting/self-hosted-functions#calling-supabase-services-from-functions`
-                      : `${DOCS_URL}/guides/functions/secrets#default-secrets`
-                  }
-                />
+                <DocsButton href={`${DOCS_URL}/guides/functions/secrets#default-secrets`} />
               </div>
               <DefaultEdgeFunctionSecrets
                 secrets={DEFAULT_EDGE_FUNCTION_SECRETS.filter((secret) => !secret.isRuntime)}
@@ -84,6 +68,20 @@ const SecretsPage: NextPageWithLayout = () => {
       <PageSection>
         <PageSectionContent className="space-y-4 md:space-y-8">
           <EdgeFunctionSecrets />
+          {isSelfHosted && (
+            <section className="space-y-4">
+              <div className="space-y-1">
+                <h3 className="text-foreground text-base">Default secrets</h3>
+                <p className="text-sm text-foreground-light">
+                  Reserved secrets available in every function. Custom secrets above are added to
+                  them and take effect on the next request.
+                </p>
+              </div>
+              <DefaultEdgeFunctionSecrets
+                secrets={DEFAULT_EDGE_FUNCTION_SECRETS.filter((secret) => !secret.isRuntime)}
+              />
+            </section>
+          )}
         </PageSectionContent>
       </PageSection>
     </PageContainer>

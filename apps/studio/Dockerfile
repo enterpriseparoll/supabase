@@ -49,7 +49,10 @@ COPY --from=turbo /app/out/pnpm-lock.yaml ./
 COPY ./patches/ ./patches
 
 # No need to clean cache because production uses standalone build
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=studio-pnpm-store,target=/pnpm/store \
+  --mount=type=cache,id=studio-pnpm-metadata,target=/root/.cache/pnpm \
+  pnpm install --frozen-lockfile --store-dir=/pnpm/store \
+  --fetch-timeout=180000 --network-concurrency=32
 
 # dev contains dependencies and source code not compiled
 FROM deps AS dev

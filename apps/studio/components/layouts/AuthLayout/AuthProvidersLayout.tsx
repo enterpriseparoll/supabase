@@ -5,6 +5,7 @@ import AuthLayout from './AuthLayout'
 import { PageLayout } from '@/components/layouts/PageLayout/PageLayout'
 import { UnknownInterface } from '@/components/ui/UnknownInterface'
 import { useIsFeatureEnabled } from '@/hooks/misc/useIsFeatureEnabled'
+import { IS_PLATFORM } from '@/lib/constants'
 
 export const AuthProvidersLayout = ({ children }: PropsWithChildren<{}>) => {
   const { ref } = useParams()
@@ -13,12 +14,15 @@ export const AuthProvidersLayout = ({ children }: PropsWithChildren<{}>) => {
     'authentication:third_party_auth',
   ])
 
+  // Third-party Auth is configured through the platform API, which self-hosting lacks.
+  const showThirdPartyAuth = IS_PLATFORM && authenticationThirdPartyAuth
+
   const navItems = [
     {
       label: 'Supabase Auth',
       href: `/project/${ref}/auth/providers`,
     },
-    ...(authenticationThirdPartyAuth
+    ...(showThirdPartyAuth
       ? [
           {
             label: 'Third-Party Auth',

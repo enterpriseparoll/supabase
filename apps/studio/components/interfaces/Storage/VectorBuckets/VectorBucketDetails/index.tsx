@@ -48,6 +48,7 @@ import { AlertError } from '@/components/ui/AlertError'
 import { TableRowNoResults } from '@/components/ui/TableRowNoResults'
 import { useVectorBucketQuery } from '@/data/storage/vector-bucket-query'
 import { useVectorBucketsIndexesQuery } from '@/data/storage/vector-buckets-indexes-query'
+import { IS_PLATFORM } from '@/lib/constants'
 
 export const VectorBucketDetails = () => {
   const router = useRouter()
@@ -140,14 +141,14 @@ export const VectorBucketDetails = () => {
               </div>
             </div>
 
-            {state === 'not-installed' && (
+            {IS_PLATFORM && state === 'not-installed' && (
               <ExtensionNotInstalled
                 projectRef={projectRef!}
                 wrapperMeta={wrapperMeta!}
                 wrappersExtension={wrappersExtension!}
               />
             )}
-            {state === 'needs-upgrade' && (
+            {IS_PLATFORM && state === 'needs-upgrade' && (
               <ExtensionNeedsUpgrade
                 projectRef={projectRef!}
                 wrapperMeta={wrapperMeta!}
@@ -155,7 +156,9 @@ export const VectorBucketDetails = () => {
               />
             )}
 
-            {state === 'missing' && <WrapperMissing bucketName={bucket?.vectorBucketName} />}
+            {IS_PLATFORM && state === 'missing' && (
+              <WrapperMissing bucketName={bucket?.vectorBucketName} />
+            )}
             {isLoadingIndexes ? (
               <GenericSkeletonLoader />
             ) : (

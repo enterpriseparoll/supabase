@@ -1,6 +1,7 @@
 import { IS_PLATFORM, useParams } from 'common'
 
 import { BucketsUpgradePlan } from '@/components/interfaces/Storage/BucketsUpgradePlan'
+import { SelfHostedStorageUnavailable } from '@/components/interfaces/Storage/SelfHostedStorageUnavailable'
 import { VectorsBuckets } from '@/components/interfaces/Storage/VectorBuckets'
 import { DefaultLayout } from '@/components/layouts/DefaultLayout'
 import { StorageBucketsLayout } from '@/components/layouts/StorageLayout/StorageBucketsLayout'
@@ -15,7 +16,7 @@ const StorageVectorsPage: NextPageWithLayout = () => {
   if (IS_PLATFORM && !isVectorBucketsEnabled) {
     return <BucketsUpgradePlan type="vector" />
   } else if (!isVectorBucketsEnabled) {
-    return null
+    return <SelfHostedStorageUnavailable type="vectors" />
   } else {
     return <VectorsBuckets />
   }

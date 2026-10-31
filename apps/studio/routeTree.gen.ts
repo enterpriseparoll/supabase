@@ -237,6 +237,7 @@ import { Route as ApiPlatformProjectsRefRunLintsRouteImport } from './routes/api
 import { Route as ApiPlatformProjectsRefSettingsRouteImport } from './routes/api/platform/projects/$ref/settings'
 import { Route as ApiPlatformPropsOrgSlugRouteImport } from './routes/api/platform/props/org/$slug'
 import { Route as ApiV1ProjectsRefApiKeysRouteImport } from './routes/api/v1/projects/$ref/api-keys'
+import { Route as ApiV1ProjectsRefSecretsRouteImport } from './routes/api/v1/projects/$ref/secrets'
 import { Route as IntegrationsVercelSlugDeployButtonNewProjectRouteImport } from './routes/integrations/vercel/$slug/deploy-button/new-project'
 import { Route as IntegrationsVercelSlugMarketplaceChooseProjectRouteImport } from './routes/integrations/vercel/$slug/marketplace/choose-project'
 import { Route as ProjectRefAdvisorsRulesPerformanceRouteImport } from './routes/project/$ref/advisors/rules/performance'
@@ -282,6 +283,8 @@ import { Route as ProjectRefStorageFilesIndexRouteImport } from './routes/projec
 import { Route as ProjectRefStorageFilesPoliciesRouteImport } from './routes/project/$ref/storage/files/policies'
 import { Route as ProjectRefStorageFilesSettingsRouteImport } from './routes/project/$ref/storage/files/settings'
 import { Route as ProjectRefStorageVectorsIndexRouteImport } from './routes/project/$ref/storage/vectors/index'
+import { Route as ApiPlatformAuthRefConfigIndexRouteImport } from './routes/api/platform/auth/$ref/config/index'
+import { Route as ApiPlatformAuthRefConfigHooksRouteImport } from './routes/api/platform/auth/$ref/config/hooks'
 import { Route as ApiPlatformAuthRefUsersIndexRouteImport } from './routes/api/platform/auth/$ref/users/index'
 import { Route as ApiPlatformOrganizationsSlugBillingSubscriptionRouteImport } from './routes/api/platform/organizations/$slug/billing/subscription'
 import { Route as ApiPlatformPgMetaRefQueryIndexRouteImport } from './routes/api/platform/pg-meta/$ref/query/index'
@@ -301,12 +304,15 @@ import { Route as ApiPlatformStorageRefVectorBucketsIndexRouteImport } from './r
 import { Route as ApiV1ProjectsRefApiKeysIdRouteImport } from './routes/api/v1/projects/$ref/api-keys/$id'
 import { Route as ApiV1ProjectsRefDatabaseMigrationsRouteImport } from './routes/api/v1/projects/$ref/database/migrations'
 import { Route as ApiV1ProjectsRefFunctionsIndexRouteImport } from './routes/api/v1/projects/$ref/functions/index'
+import { Route as ApiV1ProjectsRefFunctionsDeployRouteImport } from './routes/api/v1/projects/$ref/functions/deploy'
 import { Route as ApiV1ProjectsRefTypesTypescriptRouteImport } from './routes/api/v1/projects/$ref/types/typescript'
 import { Route as ProjectRefIntegrationsIdPageIdIndexRouteImport } from './routes/project/$ref/integrations/$id/$pageId/index'
 import { Route as ProjectRefSettingsInfrastructureReplicaReplicaIdRouteImport } from './routes/project/$ref/settings/infrastructure/replica/$replicaId'
 import { Route as ProjectRefStorageAnalyticsBucketsBucketIdRouteImport } from './routes/project/$ref/storage/analytics/buckets/$bucketId'
 import { Route as ProjectRefStorageFilesBucketsBucketIdRouteImport } from './routes/project/$ref/storage/files/buckets/$bucketId'
 import { Route as ProjectRefStorageVectorsBucketsBucketIdRouteImport } from './routes/project/$ref/storage/vectors/buckets/$bucketId'
+import { Route as ApiPlatformAuthRefTemplatesTemplateContentRouteImport } from './routes/api/platform/auth/$ref/templates/$template/content'
+import { Route as ApiPlatformAuthRefTemplatesTemplateResetRouteImport } from './routes/api/platform/auth/$ref/templates/$template/reset'
 import { Route as ApiPlatformAuthRefUsersIdIndexRouteImport } from './routes/api/platform/auth/$ref/users/$id/index'
 import { Route as ApiPlatformAuthRefUsersIdFactorsRouteImport } from './routes/api/platform/auth/$ref/users/$id/factors'
 import { Route as ApiPlatformProjectsRefAnalyticsEndpointsNameRouteImport } from './routes/api/platform/projects/$ref/analytics/endpoints/$name'
@@ -1569,6 +1575,11 @@ const ApiV1ProjectsRefApiKeysRoute = ApiV1ProjectsRefApiKeysRouteImport.update({
   path: '/api/v1/projects/$ref/api-keys',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1ProjectsRefSecretsRoute = ApiV1ProjectsRefSecretsRouteImport.update({
+  id: '/api/v1/projects/$ref/secrets',
+  path: '/api/v1/projects/$ref/secrets',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IntegrationsVercelSlugDeployButtonNewProjectRoute =
   IntegrationsVercelSlugDeployButtonNewProjectRouteImport.update({
     id: '/$slug/deploy-button/new-project',
@@ -1839,6 +1850,18 @@ const ProjectRefStorageVectorsIndexRoute =
     path: '/vectors/',
     getParentRoute: () => ProjectRefStorageRoute,
   } as any)
+const ApiPlatformAuthRefConfigIndexRoute =
+  ApiPlatformAuthRefConfigIndexRouteImport.update({
+    id: '/api/platform/auth/$ref/config/',
+    path: '/api/platform/auth/$ref/config/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPlatformAuthRefConfigHooksRoute =
+  ApiPlatformAuthRefConfigHooksRouteImport.update({
+    id: '/api/platform/auth/$ref/config/hooks',
+    path: '/api/platform/auth/$ref/config/hooks',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPlatformAuthRefUsersIndexRoute =
   ApiPlatformAuthRefUsersIndexRouteImport.update({
     id: '/api/platform/auth/$ref/users/',
@@ -1953,6 +1976,12 @@ const ApiV1ProjectsRefFunctionsIndexRoute =
     path: '/api/v1/projects/$ref/functions/',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiV1ProjectsRefFunctionsDeployRoute =
+  ApiV1ProjectsRefFunctionsDeployRouteImport.update({
+    id: '/api/v1/projects/$ref/functions/deploy',
+    path: '/api/v1/projects/$ref/functions/deploy',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiV1ProjectsRefTypesTypescriptRoute =
   ApiV1ProjectsRefTypesTypescriptRouteImport.update({
     id: '/api/v1/projects/$ref/types/typescript',
@@ -1988,6 +2017,18 @@ const ProjectRefStorageVectorsBucketsBucketIdRoute =
     id: '/vectors/buckets/$bucketId',
     path: '/vectors/buckets/$bucketId',
     getParentRoute: () => ProjectRefStorageRoute,
+  } as any)
+const ApiPlatformAuthRefTemplatesTemplateContentRoute =
+  ApiPlatformAuthRefTemplatesTemplateContentRouteImport.update({
+    id: '/api/platform/auth/$ref/templates/$template/content',
+    path: '/api/platform/auth/$ref/templates/$template/content',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPlatformAuthRefTemplatesTemplateResetRoute =
+  ApiPlatformAuthRefTemplatesTemplateResetRouteImport.update({
+    id: '/api/platform/auth/$ref/templates/$template/reset',
+    path: '/api/platform/auth/$ref/templates/$template/reset',
+    getParentRoute: () => rootRouteImport,
   } as any)
 const ApiPlatformAuthRefUsersIdIndexRoute =
   ApiPlatformAuthRefUsersIdIndexRouteImport.update({
@@ -2370,6 +2411,7 @@ export interface FileRoutesByFullPath {
   '/api/platform/projects/$ref/settings': typeof ApiPlatformProjectsRefSettingsRoute
   '/api/platform/props/org/$slug': typeof ApiPlatformPropsOrgSlugRoute
   '/api/v1/projects/$ref/api-keys': typeof ApiV1ProjectsRefApiKeysRouteWithChildren
+  '/api/v1/projects/$ref/secrets': typeof ApiV1ProjectsRefSecretsRoute
   '/integrations/vercel/$slug/deploy-button/new-project': typeof IntegrationsVercelSlugDeployButtonNewProjectRoute
   '/integrations/vercel/$slug/marketplace/choose-project': typeof IntegrationsVercelSlugMarketplaceChooseProjectRoute
   '/project/$ref/advisors/rules/performance': typeof ProjectRefAdvisorsRulesPerformanceRoute
@@ -2418,6 +2460,7 @@ export interface FileRoutesByFullPath {
   '/project/$ref/storage/analytics/': typeof ProjectRefStorageAnalyticsIndexRoute
   '/project/$ref/storage/files/': typeof ProjectRefStorageFilesIndexRoute
   '/project/$ref/storage/vectors/': typeof ProjectRefStorageVectorsIndexRoute
+  '/api/platform/auth/$ref/config/hooks': typeof ApiPlatformAuthRefConfigHooksRoute
   '/api/platform/organizations/$slug/billing/subscription': typeof ApiPlatformOrganizationsSlugBillingSubscriptionRoute
   '/api/platform/projects/$ref/analytics/log-drains': typeof ApiPlatformProjectsRefAnalyticsLogDrainsRouteWithChildren
   '/api/platform/projects/$ref/api-keys/temporary': typeof ApiPlatformProjectsRefApiKeysTemporaryRoute
@@ -2429,11 +2472,13 @@ export interface FileRoutesByFullPath {
   '/api/platform/props/project/$ref/api': typeof ApiPlatformPropsProjectRefApiRoute
   '/api/v1/projects/$ref/api-keys/$id': typeof ApiV1ProjectsRefApiKeysIdRoute
   '/api/v1/projects/$ref/database/migrations': typeof ApiV1ProjectsRefDatabaseMigrationsRoute
+  '/api/v1/projects/$ref/functions/deploy': typeof ApiV1ProjectsRefFunctionsDeployRoute
   '/api/v1/projects/$ref/types/typescript': typeof ApiV1ProjectsRefTypesTypescriptRoute
   '/project/$ref/settings/infrastructure/replica/$replicaId': typeof ProjectRefSettingsInfrastructureReplicaReplicaIdRoute
   '/project/$ref/storage/analytics/buckets/$bucketId': typeof ProjectRefStorageAnalyticsBucketsBucketIdRoute
   '/project/$ref/storage/files/buckets/$bucketId': typeof ProjectRefStorageFilesBucketsBucketIdRoute
   '/project/$ref/storage/vectors/buckets/$bucketId': typeof ProjectRefStorageVectorsBucketsBucketIdRoute
+  '/api/platform/auth/$ref/config/': typeof ApiPlatformAuthRefConfigIndexRoute
   '/api/platform/auth/$ref/users/': typeof ApiPlatformAuthRefUsersIndexRoute
   '/api/platform/pg-meta/$ref/query/': typeof ApiPlatformPgMetaRefQueryIndexRoute
   '/api/platform/projects/$ref/config/': typeof ApiPlatformProjectsRefConfigIndexRoute
@@ -2443,6 +2488,8 @@ export interface FileRoutesByFullPath {
   '/api/platform/storage/$ref/vector-buckets/': typeof ApiPlatformStorageRefVectorBucketsIndexRoute
   '/api/v1/projects/$ref/functions/': typeof ApiV1ProjectsRefFunctionsIndexRoute
   '/project/$ref/integrations/$id/$pageId/': typeof ProjectRefIntegrationsIdPageIdIndexRoute
+  '/api/platform/auth/$ref/templates/$template/content': typeof ApiPlatformAuthRefTemplatesTemplateContentRoute
+  '/api/platform/auth/$ref/templates/$template/reset': typeof ApiPlatformAuthRefTemplatesTemplateResetRoute
   '/api/platform/auth/$ref/users/$id/factors': typeof ApiPlatformAuthRefUsersIdFactorsRoute
   '/api/platform/projects/$ref/analytics/endpoints/$name': typeof ApiPlatformProjectsRefAnalyticsEndpointsNameRoute
   '/api/platform/projects/$ref/analytics/log-drains/$uuid': typeof ApiPlatformProjectsRefAnalyticsLogDrainsUuidRoute
@@ -2679,6 +2726,7 @@ export interface FileRoutesByTo {
   '/api/platform/projects/$ref/settings': typeof ApiPlatformProjectsRefSettingsRoute
   '/api/platform/props/org/$slug': typeof ApiPlatformPropsOrgSlugRoute
   '/api/v1/projects/$ref/api-keys': typeof ApiV1ProjectsRefApiKeysRouteWithChildren
+  '/api/v1/projects/$ref/secrets': typeof ApiV1ProjectsRefSecretsRoute
   '/integrations/vercel/$slug/deploy-button/new-project': typeof IntegrationsVercelSlugDeployButtonNewProjectRoute
   '/integrations/vercel/$slug/marketplace/choose-project': typeof IntegrationsVercelSlugMarketplaceChooseProjectRoute
   '/project/$ref/advisors/rules/performance': typeof ProjectRefAdvisorsRulesPerformanceRoute
@@ -2727,6 +2775,7 @@ export interface FileRoutesByTo {
   '/project/$ref/storage/analytics': typeof ProjectRefStorageAnalyticsIndexRoute
   '/project/$ref/storage/files': typeof ProjectRefStorageFilesIndexRoute
   '/project/$ref/storage/vectors': typeof ProjectRefStorageVectorsIndexRoute
+  '/api/platform/auth/$ref/config/hooks': typeof ApiPlatformAuthRefConfigHooksRoute
   '/api/platform/organizations/$slug/billing/subscription': typeof ApiPlatformOrganizationsSlugBillingSubscriptionRoute
   '/api/platform/projects/$ref/analytics/log-drains': typeof ApiPlatformProjectsRefAnalyticsLogDrainsRouteWithChildren
   '/api/platform/projects/$ref/api-keys/temporary': typeof ApiPlatformProjectsRefApiKeysTemporaryRoute
@@ -2738,11 +2787,13 @@ export interface FileRoutesByTo {
   '/api/platform/props/project/$ref/api': typeof ApiPlatformPropsProjectRefApiRoute
   '/api/v1/projects/$ref/api-keys/$id': typeof ApiV1ProjectsRefApiKeysIdRoute
   '/api/v1/projects/$ref/database/migrations': typeof ApiV1ProjectsRefDatabaseMigrationsRoute
+  '/api/v1/projects/$ref/functions/deploy': typeof ApiV1ProjectsRefFunctionsDeployRoute
   '/api/v1/projects/$ref/types/typescript': typeof ApiV1ProjectsRefTypesTypescriptRoute
   '/project/$ref/settings/infrastructure/replica/$replicaId': typeof ProjectRefSettingsInfrastructureReplicaReplicaIdRoute
   '/project/$ref/storage/analytics/buckets/$bucketId': typeof ProjectRefStorageAnalyticsBucketsBucketIdRoute
   '/project/$ref/storage/files/buckets/$bucketId': typeof ProjectRefStorageFilesBucketsBucketIdRoute
   '/project/$ref/storage/vectors/buckets/$bucketId': typeof ProjectRefStorageVectorsBucketsBucketIdRoute
+  '/api/platform/auth/$ref/config': typeof ApiPlatformAuthRefConfigIndexRoute
   '/api/platform/auth/$ref/users': typeof ApiPlatformAuthRefUsersIndexRoute
   '/api/platform/pg-meta/$ref/query': typeof ApiPlatformPgMetaRefQueryIndexRoute
   '/api/platform/projects/$ref/config': typeof ApiPlatformProjectsRefConfigIndexRoute
@@ -2752,6 +2803,8 @@ export interface FileRoutesByTo {
   '/api/platform/storage/$ref/vector-buckets': typeof ApiPlatformStorageRefVectorBucketsIndexRoute
   '/api/v1/projects/$ref/functions': typeof ApiV1ProjectsRefFunctionsIndexRoute
   '/project/$ref/integrations/$id/$pageId': typeof ProjectRefIntegrationsIdPageIdIndexRoute
+  '/api/platform/auth/$ref/templates/$template/content': typeof ApiPlatformAuthRefTemplatesTemplateContentRoute
+  '/api/platform/auth/$ref/templates/$template/reset': typeof ApiPlatformAuthRefTemplatesTemplateResetRoute
   '/api/platform/auth/$ref/users/$id/factors': typeof ApiPlatformAuthRefUsersIdFactorsRoute
   '/api/platform/projects/$ref/analytics/endpoints/$name': typeof ApiPlatformProjectsRefAnalyticsEndpointsNameRoute
   '/api/platform/projects/$ref/analytics/log-drains/$uuid': typeof ApiPlatformProjectsRefAnalyticsLogDrainsUuidRoute
@@ -3006,6 +3059,7 @@ export interface FileRoutesById {
   '/api/platform/projects/$ref/settings': typeof ApiPlatformProjectsRefSettingsRoute
   '/api/platform/props/org/$slug': typeof ApiPlatformPropsOrgSlugRoute
   '/api/v1/projects/$ref/api-keys': typeof ApiV1ProjectsRefApiKeysRouteWithChildren
+  '/api/v1/projects/$ref/secrets': typeof ApiV1ProjectsRefSecretsRoute
   '/integrations/vercel/$slug/deploy-button/new-project': typeof IntegrationsVercelSlugDeployButtonNewProjectRoute
   '/integrations/vercel/$slug/marketplace/choose-project': typeof IntegrationsVercelSlugMarketplaceChooseProjectRoute
   '/project/$ref/advisors/rules/performance': typeof ProjectRefAdvisorsRulesPerformanceRoute
@@ -3054,6 +3108,7 @@ export interface FileRoutesById {
   '/project/$ref/storage/analytics/': typeof ProjectRefStorageAnalyticsIndexRoute
   '/project/$ref/storage/files/': typeof ProjectRefStorageFilesIndexRoute
   '/project/$ref/storage/vectors/': typeof ProjectRefStorageVectorsIndexRoute
+  '/api/platform/auth/$ref/config/hooks': typeof ApiPlatformAuthRefConfigHooksRoute
   '/api/platform/organizations/$slug/billing/subscription': typeof ApiPlatformOrganizationsSlugBillingSubscriptionRoute
   '/api/platform/projects/$ref/analytics/log-drains': typeof ApiPlatformProjectsRefAnalyticsLogDrainsRouteWithChildren
   '/api/platform/projects/$ref/api-keys/temporary': typeof ApiPlatformProjectsRefApiKeysTemporaryRoute
@@ -3065,11 +3120,13 @@ export interface FileRoutesById {
   '/api/platform/props/project/$ref/api': typeof ApiPlatformPropsProjectRefApiRoute
   '/api/v1/projects/$ref/api-keys/$id': typeof ApiV1ProjectsRefApiKeysIdRoute
   '/api/v1/projects/$ref/database/migrations': typeof ApiV1ProjectsRefDatabaseMigrationsRoute
+  '/api/v1/projects/$ref/functions/deploy': typeof ApiV1ProjectsRefFunctionsDeployRoute
   '/api/v1/projects/$ref/types/typescript': typeof ApiV1ProjectsRefTypesTypescriptRoute
   '/project/$ref/settings/infrastructure/replica/$replicaId': typeof ProjectRefSettingsInfrastructureReplicaReplicaIdRoute
   '/project/$ref/storage/analytics/buckets/$bucketId': typeof ProjectRefStorageAnalyticsBucketsBucketIdRoute
   '/project/$ref/storage/files/buckets/$bucketId': typeof ProjectRefStorageFilesBucketsBucketIdRoute
   '/project/$ref/storage/vectors/buckets/$bucketId': typeof ProjectRefStorageVectorsBucketsBucketIdRoute
+  '/api/platform/auth/$ref/config/': typeof ApiPlatformAuthRefConfigIndexRoute
   '/api/platform/auth/$ref/users/': typeof ApiPlatformAuthRefUsersIndexRoute
   '/api/platform/pg-meta/$ref/query/': typeof ApiPlatformPgMetaRefQueryIndexRoute
   '/api/platform/projects/$ref/config/': typeof ApiPlatformProjectsRefConfigIndexRoute
@@ -3079,6 +3136,8 @@ export interface FileRoutesById {
   '/api/platform/storage/$ref/vector-buckets/': typeof ApiPlatformStorageRefVectorBucketsIndexRoute
   '/api/v1/projects/$ref/functions/': typeof ApiV1ProjectsRefFunctionsIndexRoute
   '/project/$ref/integrations/$id/$pageId/': typeof ProjectRefIntegrationsIdPageIdIndexRoute
+  '/api/platform/auth/$ref/templates/$template/content': typeof ApiPlatformAuthRefTemplatesTemplateContentRoute
+  '/api/platform/auth/$ref/templates/$template/reset': typeof ApiPlatformAuthRefTemplatesTemplateResetRoute
   '/api/platform/auth/$ref/users/$id/factors': typeof ApiPlatformAuthRefUsersIdFactorsRoute
   '/api/platform/projects/$ref/analytics/endpoints/$name': typeof ApiPlatformProjectsRefAnalyticsEndpointsNameRoute
   '/api/platform/projects/$ref/analytics/log-drains/$uuid': typeof ApiPlatformProjectsRefAnalyticsLogDrainsUuidRoute
@@ -3332,6 +3391,7 @@ export interface FileRouteTypes {
     | '/api/platform/projects/$ref/settings'
     | '/api/platform/props/org/$slug'
     | '/api/v1/projects/$ref/api-keys'
+    | '/api/v1/projects/$ref/secrets'
     | '/integrations/vercel/$slug/deploy-button/new-project'
     | '/integrations/vercel/$slug/marketplace/choose-project'
     | '/project/$ref/advisors/rules/performance'
@@ -3380,6 +3440,7 @@ export interface FileRouteTypes {
     | '/project/$ref/storage/analytics/'
     | '/project/$ref/storage/files/'
     | '/project/$ref/storage/vectors/'
+    | '/api/platform/auth/$ref/config/hooks'
     | '/api/platform/organizations/$slug/billing/subscription'
     | '/api/platform/projects/$ref/analytics/log-drains'
     | '/api/platform/projects/$ref/api-keys/temporary'
@@ -3391,11 +3452,13 @@ export interface FileRouteTypes {
     | '/api/platform/props/project/$ref/api'
     | '/api/v1/projects/$ref/api-keys/$id'
     | '/api/v1/projects/$ref/database/migrations'
+    | '/api/v1/projects/$ref/functions/deploy'
     | '/api/v1/projects/$ref/types/typescript'
     | '/project/$ref/settings/infrastructure/replica/$replicaId'
     | '/project/$ref/storage/analytics/buckets/$bucketId'
     | '/project/$ref/storage/files/buckets/$bucketId'
     | '/project/$ref/storage/vectors/buckets/$bucketId'
+    | '/api/platform/auth/$ref/config/'
     | '/api/platform/auth/$ref/users/'
     | '/api/platform/pg-meta/$ref/query/'
     | '/api/platform/projects/$ref/config/'
@@ -3405,6 +3468,8 @@ export interface FileRouteTypes {
     | '/api/platform/storage/$ref/vector-buckets/'
     | '/api/v1/projects/$ref/functions/'
     | '/project/$ref/integrations/$id/$pageId/'
+    | '/api/platform/auth/$ref/templates/$template/content'
+    | '/api/platform/auth/$ref/templates/$template/reset'
     | '/api/platform/auth/$ref/users/$id/factors'
     | '/api/platform/projects/$ref/analytics/endpoints/$name'
     | '/api/platform/projects/$ref/analytics/log-drains/$uuid'
@@ -3641,6 +3706,7 @@ export interface FileRouteTypes {
     | '/api/platform/projects/$ref/settings'
     | '/api/platform/props/org/$slug'
     | '/api/v1/projects/$ref/api-keys'
+    | '/api/v1/projects/$ref/secrets'
     | '/integrations/vercel/$slug/deploy-button/new-project'
     | '/integrations/vercel/$slug/marketplace/choose-project'
     | '/project/$ref/advisors/rules/performance'
@@ -3689,6 +3755,7 @@ export interface FileRouteTypes {
     | '/project/$ref/storage/analytics'
     | '/project/$ref/storage/files'
     | '/project/$ref/storage/vectors'
+    | '/api/platform/auth/$ref/config/hooks'
     | '/api/platform/organizations/$slug/billing/subscription'
     | '/api/platform/projects/$ref/analytics/log-drains'
     | '/api/platform/projects/$ref/api-keys/temporary'
@@ -3700,11 +3767,13 @@ export interface FileRouteTypes {
     | '/api/platform/props/project/$ref/api'
     | '/api/v1/projects/$ref/api-keys/$id'
     | '/api/v1/projects/$ref/database/migrations'
+    | '/api/v1/projects/$ref/functions/deploy'
     | '/api/v1/projects/$ref/types/typescript'
     | '/project/$ref/settings/infrastructure/replica/$replicaId'
     | '/project/$ref/storage/analytics/buckets/$bucketId'
     | '/project/$ref/storage/files/buckets/$bucketId'
     | '/project/$ref/storage/vectors/buckets/$bucketId'
+    | '/api/platform/auth/$ref/config'
     | '/api/platform/auth/$ref/users'
     | '/api/platform/pg-meta/$ref/query'
     | '/api/platform/projects/$ref/config'
@@ -3714,6 +3783,8 @@ export interface FileRouteTypes {
     | '/api/platform/storage/$ref/vector-buckets'
     | '/api/v1/projects/$ref/functions'
     | '/project/$ref/integrations/$id/$pageId'
+    | '/api/platform/auth/$ref/templates/$template/content'
+    | '/api/platform/auth/$ref/templates/$template/reset'
     | '/api/platform/auth/$ref/users/$id/factors'
     | '/api/platform/projects/$ref/analytics/endpoints/$name'
     | '/api/platform/projects/$ref/analytics/log-drains/$uuid'
@@ -3967,6 +4038,7 @@ export interface FileRouteTypes {
     | '/api/platform/projects/$ref/settings'
     | '/api/platform/props/org/$slug'
     | '/api/v1/projects/$ref/api-keys'
+    | '/api/v1/projects/$ref/secrets'
     | '/integrations/vercel/$slug/deploy-button/new-project'
     | '/integrations/vercel/$slug/marketplace/choose-project'
     | '/project/$ref/advisors/rules/performance'
@@ -4015,6 +4087,7 @@ export interface FileRouteTypes {
     | '/project/$ref/storage/analytics/'
     | '/project/$ref/storage/files/'
     | '/project/$ref/storage/vectors/'
+    | '/api/platform/auth/$ref/config/hooks'
     | '/api/platform/organizations/$slug/billing/subscription'
     | '/api/platform/projects/$ref/analytics/log-drains'
     | '/api/platform/projects/$ref/api-keys/temporary'
@@ -4026,11 +4099,13 @@ export interface FileRouteTypes {
     | '/api/platform/props/project/$ref/api'
     | '/api/v1/projects/$ref/api-keys/$id'
     | '/api/v1/projects/$ref/database/migrations'
+    | '/api/v1/projects/$ref/functions/deploy'
     | '/api/v1/projects/$ref/types/typescript'
     | '/project/$ref/settings/infrastructure/replica/$replicaId'
     | '/project/$ref/storage/analytics/buckets/$bucketId'
     | '/project/$ref/storage/files/buckets/$bucketId'
     | '/project/$ref/storage/vectors/buckets/$bucketId'
+    | '/api/platform/auth/$ref/config/'
     | '/api/platform/auth/$ref/users/'
     | '/api/platform/pg-meta/$ref/query/'
     | '/api/platform/projects/$ref/config/'
@@ -4040,6 +4115,8 @@ export interface FileRouteTypes {
     | '/api/platform/storage/$ref/vector-buckets/'
     | '/api/v1/projects/$ref/functions/'
     | '/project/$ref/integrations/$id/$pageId/'
+    | '/api/platform/auth/$ref/templates/$template/content'
+    | '/api/platform/auth/$ref/templates/$template/reset'
     | '/api/platform/auth/$ref/users/$id/factors'
     | '/api/platform/projects/$ref/analytics/endpoints/$name'
     | '/api/platform/projects/$ref/analytics/log-drains/$uuid'
@@ -4147,7 +4224,9 @@ export interface RootRouteChildren {
   ApiPlatformProjectsRefSettingsRoute: typeof ApiPlatformProjectsRefSettingsRoute
   ApiPlatformPropsOrgSlugRoute: typeof ApiPlatformPropsOrgSlugRoute
   ApiV1ProjectsRefApiKeysRoute: typeof ApiV1ProjectsRefApiKeysRouteWithChildren
+  ApiV1ProjectsRefSecretsRoute: typeof ApiV1ProjectsRefSecretsRoute
   ApiPlatformProjectsRefIndexRoute: typeof ApiPlatformProjectsRefIndexRoute
+  ApiPlatformAuthRefConfigHooksRoute: typeof ApiPlatformAuthRefConfigHooksRoute
   ApiPlatformOrganizationsSlugBillingSubscriptionRoute: typeof ApiPlatformOrganizationsSlugBillingSubscriptionRoute
   ApiPlatformProjectsRefAnalyticsLogDrainsRoute: typeof ApiPlatformProjectsRefAnalyticsLogDrainsRouteWithChildren
   ApiPlatformProjectsRefApiKeysTemporaryRoute: typeof ApiPlatformProjectsRefApiKeysTemporaryRoute
@@ -4158,7 +4237,9 @@ export interface RootRouteChildren {
   ApiPlatformProjectsRefContentCountRoute: typeof ApiPlatformProjectsRefContentCountRoute
   ApiPlatformPropsProjectRefApiRoute: typeof ApiPlatformPropsProjectRefApiRoute
   ApiV1ProjectsRefDatabaseMigrationsRoute: typeof ApiV1ProjectsRefDatabaseMigrationsRoute
+  ApiV1ProjectsRefFunctionsDeployRoute: typeof ApiV1ProjectsRefFunctionsDeployRoute
   ApiV1ProjectsRefTypesTypescriptRoute: typeof ApiV1ProjectsRefTypesTypescriptRoute
+  ApiPlatformAuthRefConfigIndexRoute: typeof ApiPlatformAuthRefConfigIndexRoute
   ApiPlatformAuthRefUsersIndexRoute: typeof ApiPlatformAuthRefUsersIndexRoute
   ApiPlatformPgMetaRefQueryIndexRoute: typeof ApiPlatformPgMetaRefQueryIndexRoute
   ApiPlatformProjectsRefConfigIndexRoute: typeof ApiPlatformProjectsRefConfigIndexRoute
@@ -4167,6 +4248,8 @@ export interface RootRouteChildren {
   ApiPlatformStorageRefBucketsIndexRoute: typeof ApiPlatformStorageRefBucketsIndexRoute
   ApiPlatformStorageRefVectorBucketsIndexRoute: typeof ApiPlatformStorageRefVectorBucketsIndexRoute
   ApiV1ProjectsRefFunctionsIndexRoute: typeof ApiV1ProjectsRefFunctionsIndexRoute
+  ApiPlatformAuthRefTemplatesTemplateContentRoute: typeof ApiPlatformAuthRefTemplatesTemplateContentRoute
+  ApiPlatformAuthRefTemplatesTemplateResetRoute: typeof ApiPlatformAuthRefTemplatesTemplateResetRoute
   ApiPlatformAuthRefUsersIdFactorsRoute: typeof ApiPlatformAuthRefUsersIdFactorsRoute
   ApiPlatformProjectsRefAnalyticsEndpointsNameRoute: typeof ApiPlatformProjectsRefAnalyticsEndpointsNameRoute
   ApiPlatformProjectsRefConfigSecretsUpdateStatusRoute: typeof ApiPlatformProjectsRefConfigSecretsUpdateStatusRoute
@@ -5791,6 +5874,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1ProjectsRefApiKeysRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/projects/$ref/secrets': {
+      id: '/api/v1/projects/$ref/secrets'
+      path: '/api/v1/projects/$ref/secrets'
+      fullPath: '/api/v1/projects/$ref/secrets'
+      preLoaderRoute: typeof ApiV1ProjectsRefSecretsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/integrations/vercel/$slug/deploy-button/new-project': {
       id: '/integrations/vercel/$slug/deploy-button/new-project'
       path: '/$slug/deploy-button/new-project'
@@ -6106,6 +6196,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectRefStorageVectorsIndexRouteImport
       parentRoute: typeof ProjectRefStorageRoute
     }
+    '/api/platform/auth/$ref/config/': {
+      id: '/api/platform/auth/$ref/config/'
+      path: '/api/platform/auth/$ref/config'
+      fullPath: '/api/platform/auth/$ref/config/'
+      preLoaderRoute: typeof ApiPlatformAuthRefConfigIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/platform/auth/$ref/config/hooks': {
+      id: '/api/platform/auth/$ref/config/hooks'
+      path: '/api/platform/auth/$ref/config/hooks'
+      fullPath: '/api/platform/auth/$ref/config/hooks'
+      preLoaderRoute: typeof ApiPlatformAuthRefConfigHooksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/platform/auth/$ref/users/': {
       id: '/api/platform/auth/$ref/users/'
       path: '/api/platform/auth/$ref/users'
@@ -6239,6 +6343,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1ProjectsRefFunctionsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/projects/$ref/functions/deploy': {
+      id: '/api/v1/projects/$ref/functions/deploy'
+      path: '/api/v1/projects/$ref/functions/deploy'
+      fullPath: '/api/v1/projects/$ref/functions/deploy'
+      preLoaderRoute: typeof ApiV1ProjectsRefFunctionsDeployRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/projects/$ref/types/typescript': {
       id: '/api/v1/projects/$ref/types/typescript'
       path: '/api/v1/projects/$ref/types/typescript'
@@ -6280,6 +6391,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/project/$ref/storage/vectors/buckets/$bucketId'
       preLoaderRoute: typeof ProjectRefStorageVectorsBucketsBucketIdRouteImport
       parentRoute: typeof ProjectRefStorageRoute
+    }
+    '/api/platform/auth/$ref/templates/$template/content': {
+      id: '/api/platform/auth/$ref/templates/$template/content'
+      path: '/api/platform/auth/$ref/templates/$template/content'
+      fullPath: '/api/platform/auth/$ref/templates/$template/content'
+      preLoaderRoute: typeof ApiPlatformAuthRefTemplatesTemplateContentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/platform/auth/$ref/templates/$template/reset': {
+      id: '/api/platform/auth/$ref/templates/$template/reset'
+      path: '/api/platform/auth/$ref/templates/$template/reset'
+      fullPath: '/api/platform/auth/$ref/templates/$template/reset'
+      preLoaderRoute: typeof ApiPlatformAuthRefTemplatesTemplateResetRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/platform/auth/$ref/users/$id/': {
       id: '/api/platform/auth/$ref/users/$id/'
@@ -7290,7 +7415,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPlatformProjectsRefSettingsRoute: ApiPlatformProjectsRefSettingsRoute,
   ApiPlatformPropsOrgSlugRoute: ApiPlatformPropsOrgSlugRoute,
   ApiV1ProjectsRefApiKeysRoute: ApiV1ProjectsRefApiKeysRouteWithChildren,
+  ApiV1ProjectsRefSecretsRoute: ApiV1ProjectsRefSecretsRoute,
   ApiPlatformProjectsRefIndexRoute: ApiPlatformProjectsRefIndexRoute,
+  ApiPlatformAuthRefConfigHooksRoute: ApiPlatformAuthRefConfigHooksRoute,
   ApiPlatformOrganizationsSlugBillingSubscriptionRoute:
     ApiPlatformOrganizationsSlugBillingSubscriptionRoute,
   ApiPlatformProjectsRefAnalyticsLogDrainsRoute:
@@ -7308,7 +7435,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPlatformPropsProjectRefApiRoute: ApiPlatformPropsProjectRefApiRoute,
   ApiV1ProjectsRefDatabaseMigrationsRoute:
     ApiV1ProjectsRefDatabaseMigrationsRoute,
+  ApiV1ProjectsRefFunctionsDeployRoute: ApiV1ProjectsRefFunctionsDeployRoute,
   ApiV1ProjectsRefTypesTypescriptRoute: ApiV1ProjectsRefTypesTypescriptRoute,
+  ApiPlatformAuthRefConfigIndexRoute: ApiPlatformAuthRefConfigIndexRoute,
   ApiPlatformAuthRefUsersIndexRoute: ApiPlatformAuthRefUsersIndexRoute,
   ApiPlatformPgMetaRefQueryIndexRoute: ApiPlatformPgMetaRefQueryIndexRoute,
   ApiPlatformProjectsRefConfigIndexRoute:
@@ -7321,6 +7450,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPlatformStorageRefVectorBucketsIndexRoute:
     ApiPlatformStorageRefVectorBucketsIndexRoute,
   ApiV1ProjectsRefFunctionsIndexRoute: ApiV1ProjectsRefFunctionsIndexRoute,
+  ApiPlatformAuthRefTemplatesTemplateContentRoute:
+    ApiPlatformAuthRefTemplatesTemplateContentRoute,
+  ApiPlatformAuthRefTemplatesTemplateResetRoute:
+    ApiPlatformAuthRefTemplatesTemplateResetRoute,
   ApiPlatformAuthRefUsersIdFactorsRoute: ApiPlatformAuthRefUsersIdFactorsRoute,
   ApiPlatformProjectsRefAnalyticsEndpointsNameRoute:
     ApiPlatformProjectsRefAnalyticsEndpointsNameRoute,

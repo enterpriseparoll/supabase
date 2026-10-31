@@ -42,16 +42,16 @@ type ConnectionStrings = {
 }
 
 /**
- * Self-hosted Supavisor pooler strings. User/password are placeholders that
- * the operator fills in — `POOLER_TENANT_ID` and the postgres password are
- * defined in the docker-compose env.
+ * Self-hosted Supavisor pooler strings. Unless the host supplies the tenant user,
+ * user/password are placeholders that the operator fills in — `POOLER_TENANT_ID`
+ * and the postgres password are defined in the docker-compose env.
  */
 export const getSelfHostedPoolerStrings = (
   dbHost: string,
   port: number | string,
-  dbName: string = 'postgres'
+  dbName: string = 'postgres',
+  user: string = 'postgres.[POOLER_TENANT_ID]'
 ): ConnectionStrings => {
-  const user = 'postgres.[POOLER_TENANT_ID]'
   const password = '[YOUR-PASSWORD]'
 
   const uri = `postgresql://${user}:${password}@${dbHost}:${port}/${dbName}`
@@ -245,6 +245,10 @@ dbname=${poolerName}`
   }
 }
 
+/** The Supavisor tenant user (`postgres.<tenant>`) when the host supplied one. */
+export const getSelfHostedTenantUser = (dbUser: string | undefined) =>
+  dbUser?.startsWith('postgres.') && dbUser.length > 'postgres.'.length ? dbUser : undefined
+
 /**
  * Shapes the ConnectionStringPooler "bag" consumed by every connection-string
  * step. On platform we keep the existing shared/dedicated pooler layout; on
@@ -260,7 +264,7 @@ export const buildConnectionStringPooler = ({
   isHighAvailability,
 }: {
   deploymentMode: DeploymentMode
-  connectionInfo: { db_host: string; db_port: number | string }
+  connectionInfo: { db_host: string; db_port: number | string; db_user?: string }
   connectionStringsShared: { direct: ConnectionStrings; pooler: ConnectionStrings }
   connectionStringsDedicated?: { direct: ConnectionStrings; pooler: ConnectionStrings }
   ipv4Addon: boolean
@@ -269,8 +273,17 @@ export const buildConnectionStringPooler = ({
   if (deploymentMode.isSelfHosted) {
     const dbHost = connectionInfo.db_host
     const dbPort = connectionInfo.db_port || 5432
-    const sessionPool = getSelfHostedPoolerStrings(dbHost, dbPort)
-    const transactionPool = getSelfHostedPoolerStrings(dbHost, 6543)
+    const tenantUser = getSelfHostedTenantUser(connectionInfo.db_user)
+    // A host that publishes a tenant-specific pooler (POOLER_PUBLIC_PORT) serves
+    // transaction mode on the next port; otherwise use Supavisor's default.
+    const transactionPort = tenantUser ? Number(dbPort) + 1 : 6543
+    const sessionPool = getSelfHostedPoolerStrings(dbHost, dbPort, undefined, tenantUser)
+    const transactionPool = getSelfHostedPoolerStrings(
+      dbHost,
+      transactionPort,
+      undefined,
+      tenantUser
+    )
     const directConn = getSelfHostedDirectStrings(dbHost, dbPort)
     return {
       transactionShared: transactionPool.uri,
